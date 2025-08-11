@@ -3,7 +3,77 @@ const router = express.Router();
 const Reservation = require('../models/Reservation');
 const { sendNotifications } = require('../services/notificationService');
 
-// Créer une nouvelle réservation
+// Créer une réservation depuis l'application desktop (jusqu'à 80 couverts)
+router.post('/desktop', async (req, res) => {
+  try {
+    const { date, time, numberOfPeople } = req.body;
+    
+    // Déterminer si c'est midi ou soir
+    const hour = parseInt(time.split(':')[0]);
+    const isMidi = hour < 15;
+    
+    // Vérifier les réservations existantes pour ce service
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    const existingReservations = await Reservation.find({
+      date: { $gte: startOfDay, $lte: endOfDay },
+      status: { $ne: 'cancelled' }
+    });
+    
+    const serviceReservations = existingReservations.filter(r => {
+      const resHour = parseInt(r.time.split(':')[0]);
+      if (isMidi) {
+        return resHour < 15;
+      } else {
+        return resHour >= 15;
+      }
+    });
+    
+    const totalCouverts = serviceReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
+    const serviceName = isMidi ? 'midi' : 'soir';
+    
+    // Pour l'app desktop, limite à 80 couverts
+    if (totalCouverts + numberOfPeople > 80) {
+      return res.status(400).json({
+        success: false,
+        message: `Désolé, le service du ${serviceName} est complet (${totalCouverts}/80 couverts).`
+      });
+    }
+    
+    const reservation = new Reservation(req.body);
+    await reservation.save();
+    
+    // Envoyer les notifications email/SMS d'abord (important pour le client)
+    try {
+      await sendNotifications(reservation);
+      console.log('Notifications envoyées avec succès');
+    } catch (err) {
+      console.error('Erreur envoi notifications:', err);
+      // L'erreur n'empêche pas la réservation d'être créée
+    }
+    
+    // Notifier l'application desktop via WebSocket après
+    const io = req.app.get('io');
+    console.log('Émission de new-reservation via Socket.IO pour:', reservation.customerName);
+    io.emit('new-reservation', reservation);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Réservation créée avec succès',
+      data: reservation
+    });
+  } catch (error) {
+    res.status(400).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// Créer une nouvelle réservation (depuis le site web - limite 50 couverts)
 router.post('/', async (req, res) => {
   try {
     // Vérifier la limite de 50 couverts par service
