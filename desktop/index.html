@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:3000 ws://localhost:3000 https://restaurant-booking-backend-y3sp.onrender.com wss://restaurant-booking-backend-y3sp.onrender.com;">
+    <title>Système de Réservation - Restaurant</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div class="header-left">
+                    <img src="assets/logo.svg" alt="Au Murmure des Flots" class="logo">
+                    <div class="header-title">
+                        <h1>Au Murmure des Flots</h1>
+                        <p class="subtitle">Système de Réservation</p>
+                    </div>
+                </div>
+                <div class="status-bar">
+                    <span id="connection-status" class="status disconnected">Déconnecté</span>
+                    <span id="current-date"></span>
+                    <span id="current-time"></span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <nav>
+                    <ul>
+                        <li><a href="#" data-view="today" class="active">📅 Aujourd'hui</a></li>
+                        <li><a href="#" data-view="week">📆 Cette semaine</a></li>
+                        <li><a href="#" data-view="clients">👥 Clients</a></li>
+                        <li><a href="#" data-view="statistics">📊 Statistiques</a></li>
+                    </ul>
+                </nav>
+                
+                <div class="quick-stats">
+                    <h3>Résumé du jour</h3>
+                    <div class="stat-item">
+                        <span class="stat-label">Réservations:</span>
+                        <span class="stat-value" id="today-count">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Couverts:</span>
+                        <span class="stat-value" id="today-covers">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Confirmées:</span>
+                        <span class="stat-value" id="today-confirmed">0</span>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="reservations-section">
+                <div class="section-header">
+                    <h2 id="reservations-title">Réservations d'aujourd'hui</h2>
+                    <button id="add-reservation-btn" class="btn" style="position: absolute; right: 20px; top: 20px; background: #28a745; color: white; padding: 10px 20px; border-radius: 5px; cursor: pointer;">
+                        ➕ Nouvelle Réservation
+                    </button>
+                    <div class="filters">
+                        <input type="date" id="date-filter" style="padding: 5px; border-radius: 5px; border: 1px solid #ddd;">
+                        <select id="service-filter" style="padding: 5px; border-radius: 5px; border: 1px solid #ddd;">
+                            <option value="all">Tous les services</option>
+                            <option value="midi">☀️ Service Midi</option>
+                            <option value="soir">🌙 Service Soir</option>
+                        </select>
+                        <select id="status-filter">
+                            <option value="all">Tous les statuts</option>
+                            <option value="pending">En attente</option>
+                            <option value="confirmed">Confirmées</option>
+                            <option value="cancelled">Annulées</option>
+                        </select>
+                        <input type="text" id="search-input" placeholder="Rechercher...">
+                    </div>
+                </div>
+
+                <div class="reservations-grid" id="reservations-container">
+                    <!-- Les réservations seront affichées ici -->
+                </div>
+                
+                <!-- Section Clients (cachée par défaut) -->
+                <div id="clients-section" style="display: none;">
+                    <div class="clients-header" style="margin-bottom: 20px;">
+                        <input type="text" id="client-search" placeholder="Rechercher un client..." style="padding: 10px; width: 300px; border-radius: 5px; border: 1px solid #ddd;">
+                        <button id="export-clients-btn" class="btn" style="float: right; background: #28a745; color: white;">📊 Exporter CSV</button>
+                    </div>
+                    <div id="clients-container">
+                        <!-- Liste des clients -->
+                    </div>
+                </div>
+                
+                <!-- Section Semaine (cachée par défaut) -->
+                <div id="week-section" style="display: none;">
+                    <div id="week-container">
+                        <!-- Planning de la semaine -->
+                    </div>
+                </div>
+                
+                <!-- Section Statistiques (cachée par défaut) -->
+                <div id="statistics-section" style="display: none;">
+                    <div id="statistics-container">
+                        <!-- Graphiques et statistiques -->
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Modal pour créer une réservation -->
+        <div id="new-reservation-modal" class="modal">
+            <div class="modal-content" style="max-width: 500px;">
+                <span class="close-new-modal" style="float: right; font-size: 28px; cursor: pointer;">&times;</span>
+                <h2>➕ Nouvelle Réservation</h2>
+                <form id="new-reservation-form" style="margin-top: 20px;">
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px;">Nom complet *</label>
+                        <input type="text" id="new-name" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px;">Date *</label>
+                            <input type="date" id="new-date" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px;">Heure *</label>
+                            <select id="new-time" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                                <option value="">-- Choisir --</option>
+                                <optgroup label="☀️ Service Midi">
+                                    <option value="12:00">12:00</option>
+                                    <option value="12:15">12:15</option>
+                                    <option value="12:30">12:30</option>
+                                    <option value="12:45">12:45</option>
+                                    <option value="13:00">13:00</option>
+                                    <option value="13:15">13:15</option>
+                                </optgroup>
+                                <optgroup label="🌙 Service Soir">
+                                    <option value="18:30">18:30</option>
+                                    <option value="18:45">18:45</option>
+                                    <option value="19:00">19:00</option>
+                                    <option value="19:15">19:15</option>
+                                    <option value="19:30">19:30</option>
+                                    <option value="19:45">19:45</option>
+                                    <option value="20:00">20:00</option>
+                                    <option value="20:15">20:15</option>
+                                    <option value="20:30">20:30</option>
+                                    <option value="20:45">20:45</option>
+                                    <option value="21:00">21:00</option>
+                                </optgroup>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px;">Nombre de personnes *</label>
+                            <select id="new-people" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;">
+                                <option value="1">1 personne</option>
+                                <option value="2" selected>2 personnes</option>
+                                <option value="3">3 personnes</option>
+                                <option value="4">4 personnes</option>
+                                <option value="5">5 personnes</option>
+                                <option value="6">6 personnes</option>
+                                <option value="7">7 personnes</option>
+                                <option value="8">8 personnes</option>
+                                <option value="9">9 personnes</option>
+                                <option value="10">10 personnes</option>
+                                <option value="12">12 personnes</option>
+                                <option value="15">15 personnes</option>
+                                <option value="20">20 personnes</option>
+                                <option value="25">25 personnes</option>
+                                <option value="30">30 personnes</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px;">Téléphone *</label>
+                            <input type="tel" id="new-phone" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;" placeholder="0692123456">
+                        </div>
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px;">Email</label>
+                        <input type="email" id="new-email" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px;" placeholder="client@email.com">
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 5px;">Demandes spéciales</label>
+                        <textarea id="new-requests" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; min-height: 60px;" placeholder="Allergies, anniversaire, préférences..."></textarea>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                        <button type="button" class="btn" id="cancel-new-btn" style="background: #6c757d; color: white; padding: 10px 20px; border-radius: 5px;">Annuler</button>
+                        <button type="submit" class="btn" style="background: #28a745; color: white; padding: 10px 20px; border-radius: 5px;">Créer la réservation</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Modal pour les détails de réservation -->
+        <div id="reservation-modal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>Détails de la réservation</h2>
+                <div id="reservation-details"></div>
+                <div class="modal-actions">
+                    <button id="confirm-btn" class="btn btn-success">Confirmer</button>
+                    <button id="cancel-btn" class="btn btn-danger">Annuler</button>
+                    <button id="edit-btn" class="btn btn-primary">Modifier</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

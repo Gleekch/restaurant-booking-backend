@@ -8,7 +8,7 @@ package-lock.json
 .env.production
 
 # Desktop app
-desktop/
+
 
 # Logs
 *.log
@@ -33,3 +33,5 @@ build/
 # Temporary files
 *.tmp
 temp/
+
+
