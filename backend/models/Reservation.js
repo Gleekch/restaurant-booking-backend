@@ -32,7 +32,7 @@ const reservationSchema = new mongoose.Schema({
   },
   source: {
     type: String,
-    enum: ['website', 'mobile', 'phone', 'walk-in'],
+    enum: ['website', 'mobile', 'phone', 'walk-in', 'desktop'],
     required: true
   },
   status: {
