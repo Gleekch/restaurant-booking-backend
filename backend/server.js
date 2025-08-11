@@ -22,7 +22,7 @@ app.use(cors({
     'http://localhost:5173',
     'http://localhost:5174',
     'https://your-dinner-spot.onrender.com',
-    'https://your-dinner-spot-*.onrender.com',
+    'https://resa-aumurmuredesflots.onrender.com',
     'https://restaurant-booking-backend-y3sp.onrender.com'
   ],
   credentials: true,
