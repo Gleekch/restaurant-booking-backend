@@ -133,7 +133,7 @@ const ReservationForm = () => {
               </div>
             </div>
             <p className="text-xs text-amber-600 mt-3 italic">
-              Maximum 50 couverts par service • Réservation possible le jour même
+              Maximum 50 réservations en ligne par service • Réservation possible le jour même
             </p>
           </div>
         </div>

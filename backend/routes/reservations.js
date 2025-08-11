@@ -64,7 +64,7 @@ router.post('/', async (req, res) => {
     if (totalCouverts + numberOfPeople > 50) {
       return res.status(400).json({
         success: false,
-        message: `Désolé, le service du ${serviceName} est complet (${totalCouverts}/50 couverts déjà réservés). Veuillez choisir un autre créneau.`
+        message: `Désolé, les réservations en ligne pour le service du ${serviceName} sont complètes (${totalCouverts}/50 réservations). Vous pouvez essayer de venir directement au restaurant ou choisir un autre créneau.`
       });
     }
     
