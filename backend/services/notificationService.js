@@ -291,7 +291,7 @@ async function sendEmailToClient(clientEmail, message, reservation) {
               <a href="tel:0262266719" style="color: #3498db; text-decoration: none; font-size: 14px;">Nous appeler</a>
             </div>
             <p style="color: #7f8c8d; margin: 20px 0 0 0; font-size: 12px;">
-              © 2024 Au Murmure des Flots - Tous droits réservés
+              © 2025 Au Murmure des Flots - Tous droits réservés
             </p>
           </div>
         </div>
