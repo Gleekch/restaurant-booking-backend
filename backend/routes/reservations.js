@@ -10,14 +10,19 @@ router.post('/', async (req, res) => {
     const { date, time, numberOfPeople } = req.body;
     const hour = parseInt(time.split(':')[0]);
     
-    // Déterminer le service
-    const isMidi = hour >= 12 && hour < 15;
-    const isSoir = hour >= 18 && hour < 23;
+    // Déterminer le service et vérifier les horaires limites
+    const [hours, minutes] = time.split(':').map(Number);
+    const timeInMinutes = hours * 60 + minutes;
+    
+    // Midi: 12h00 à 13h15 (720 à 795 minutes)
+    const isMidi = timeInMinutes >= 720 && timeInMinutes <= 795;
+    // Soir: 18h30 à 21h00 (1110 à 1260 minutes)
+    const isSoir = timeInMinutes >= 1110 && timeInMinutes <= 1260;
     
     if (!isMidi && !isSoir) {
       return res.status(400).json({
         success: false,
-        message: 'Les réservations sont uniquement possibles entre 12h-15h (midi) ou 18h-23h (soir)'
+        message: 'Les réservations sont possibles de 12h00 à 13h15 (midi) ou de 18h30 à 21h00 (soir)'
       });
     }
     
