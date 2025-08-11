@@ -46,8 +46,18 @@ async function sendNotifications(reservation) {
   }
   
   try {
-    await Promise.all([...smsPromises, ...emailPromises]);
-    console.log('Notifications envoyées avec succès');
+    const results = await Promise.allSettled([...smsPromises, ...emailPromises]);
+    
+    // Logger les résultats détaillés
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        console.error(`Notification ${index} échouée:`, result.reason);
+      } else {
+        console.log(`Notification ${index} envoyée avec succès`);
+      }
+    });
+    
+    console.log('Traitement des notifications terminé');
   } catch (error) {
     console.error('Erreur lors de l\'envoi des notifications:', error);
   }
@@ -175,8 +185,15 @@ async function sendEmail(message, reservation) {
 
 // Envoyer email au client
 async function sendEmailToClient(clientEmail, message, reservation) {
+  console.log(`Tentative d'envoi d'email au client: ${clientEmail}`);
+  
   if (!process.env.EMAIL_USER) {
-    console.log('Email non configuré');
+    console.log('EMAIL_USER non configuré dans les variables d\'environnement');
+    return;
+  }
+  
+  if (!process.env.EMAIL_PASS) {
+    console.log('EMAIL_PASS non configuré dans les variables d\'environnement');
     return;
   }
   
@@ -300,10 +317,14 @@ async function sendEmailToClient(clientEmail, message, reservation) {
   };
   
   try {
-    await emailTransporter.sendMail(mailOptions);
-    console.log(`Email de confirmation envoyé à ${clientEmail}`);
+    const info = await emailTransporter.sendMail(mailOptions);
+    console.log(`✅ Email de confirmation envoyé à ${clientEmail}`);
+    console.log(`Message ID: ${info.messageId}`);
+    console.log(`Response: ${info.response}`);
   } catch (error) {
-    console.error(`Erreur email client:`, error.message);
+    console.error(`❌ Erreur email client pour ${clientEmail}:`, error.message);
+    console.error('Détails de l\'erreur:', error);
+    throw error; // Propager l'erreur pour qu'elle soit visible dans les logs
   }
 }
 
