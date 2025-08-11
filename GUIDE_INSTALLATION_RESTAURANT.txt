@@ -1,0 +1,58 @@
+========================================================
+    GUIDE D'INSTALLATION - AU MURMURE DES FLOTS
+       Système de Gestion des Réservations
+========================================================
+
+INSTALLATION RAPIDE
+-------------------
+1. Décompressez le fichier AuMurmureDesFlots-Application.zip
+2. Ouvrez le dossier "win-unpacked"
+3. Double-cliquez sur "Au Murmure des Flots - Réservations.exe"
+4. L'application se lance automatiquement !
+
+UTILISATION
+-----------
+• L'application se connecte automatiquement au serveur de réservations
+• Status "Connecté" = Les réservations arrivent en temps réel
+• Les nouvelles réservations apparaissent instantanément
+
+FONCTIONNALITÉS PRINCIPALES
+----------------------------
+📅 VUES :
+• Aujourd'hui : Réservations du jour
+• À venir : Toutes les réservations futures
+• Historique : Réservations passées
+
+🔍 FILTRES :
+• Par date : Sélectionnez une date spécifique
+• Par service : Midi ou Soir uniquement
+• Par statut : En attente, Confirmées, Annulées
+
+📊 RÉSUMÉ DU JOUR :
+• Nombre total de réservations actives
+• Total des couverts (confirmés + en attente)
+• Répartition par service
+
+⚙️ GESTION DES RÉSERVATIONS :
+• Cliquez sur une réservation pour voir les détails
+• Bouton "Confirmer" : Valider la réservation
+• Bouton "Annuler" : Annuler la réservation
+
+INFORMATIONS IMPORTANTES
+------------------------
+• Capacité : 70 couverts par service (50 en ligne + 20 walk-in)
+• Horaires Midi : 12h00-13h15 (13h45 week-end)
+• Horaires Soir : 18h30-21h00 (21h30 week-end)
+• Les réservations en ligne sont limitées à 50 couverts par service
+
+SUPPORT
+-------
+En cas de problème :
+• Vérifiez votre connexion Internet
+• Redémarrez l'application
+• Contactez le support technique
+
+========================================================
+            Application développée pour
+           AU MURMURE DES FLOTS - Saint-Leu
+========================================================
