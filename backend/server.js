@@ -9,22 +9,34 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: ["http://localhost:3001", "http://localhost:3002"],
+    origin: "*", // Accepter toutes les origines pour l'application desktop
     methods: ["GET", "POST", "PUT", "DELETE"]
   }
 });
 
 // Middleware
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:3001', 
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'https://your-dinner-spot.onrender.com',
-    'https://resa-aumurmuredesflots.onrender.com',
-    'https://restaurant-booking-backend-y3sp.onrender.com'
-  ],
+  origin: function(origin, callback) {
+    // Autoriser les requêtes sans origine (Electron, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001', 
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'https://your-dinner-spot.onrender.com',
+      'https://resa-aumurmuredesflots.onrender.com',
+      'https://restaurant-booking-backend-y3sp.onrender.com'
+    ];
+    
+    // Autoriser aussi les requêtes depuis file:// (Electron)
+    if (origin.startsWith('file://') || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Pour l'instant, autoriser toutes les origines
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
