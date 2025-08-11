@@ -6,6 +6,52 @@ const { sendNotifications } = require('../services/notificationService');
 // Créer une nouvelle réservation
 router.post('/', async (req, res) => {
   try {
+    // Vérifier la limite de 50 couverts par service
+    const { date, time, numberOfPeople } = req.body;
+    const hour = parseInt(time.split(':')[0]);
+    
+    // Déterminer le service
+    const isMidi = hour >= 12 && hour < 15;
+    const isSoir = hour >= 18 && hour < 23;
+    
+    if (!isMidi && !isSoir) {
+      return res.status(400).json({
+        success: false,
+        message: 'Les réservations sont uniquement possibles entre 12h-15h (midi) ou 18h-23h (soir)'
+      });
+    }
+    
+    // Récupérer toutes les réservations du jour et du service
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(date);
+    endDate.setHours(23, 59, 59, 999);
+    
+    const existingReservations = await Reservation.find({
+      date: { $gte: startDate, $lte: endDate },
+      status: { $ne: 'cancelled' } // Ne pas compter les réservations annulées
+    });
+    
+    // Calculer les couverts par service
+    const serviceReservations = existingReservations.filter(r => {
+      const resHour = parseInt(r.time.split(':')[0]);
+      if (isMidi) {
+        return resHour >= 12 && resHour < 15;
+      } else {
+        return resHour >= 18 && resHour < 23;
+      }
+    });
+    
+    const totalCouverts = serviceReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
+    const serviceName = isMidi ? 'midi' : 'soir';
+    
+    if (totalCouverts + numberOfPeople > 50) {
+      return res.status(400).json({
+        success: false,
+        message: `Désolé, le service du ${serviceName} est complet (${totalCouverts}/50 couverts déjà réservés). Veuillez choisir un autre créneau.`
+      });
+    }
+    
     const reservation = new Reservation(req.body);
     await reservation.save();
     
@@ -14,6 +60,7 @@ router.post('/', async (req, res) => {
     
     // Notifier l'application desktop via WebSocket
     const io = req.app.get('io');
+    console.log('Émission de new-reservation via Socket.IO pour:', reservation.customerName);
     io.emit('new-reservation', reservation);
     
     res.status(201).json({
