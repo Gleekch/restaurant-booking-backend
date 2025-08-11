@@ -91,7 +91,8 @@ async function sendEmail(message, reservation) {
           
           <!-- Header -->
           <div style="background: linear-gradient(135deg, #ff6b6b 0%, #feca57 100%); padding: 30px; text-align: center;">
-            <h1 style="color: white; margin: 0; font-size: 28px;">🍽️ Nouvelle Réservation</h1>
+            <img src="https://raw.githubusercontent.com/Gleekch/restaurant-booking-backend/main/assets/logo.png" alt="Au Murmure des Flots" style="width: 80px; height: 80px; border-radius: 50%; background: white; padding: 8px; margin: 0 auto 15px; display: block; box-shadow: 0 3px 10px rgba(0,0,0,0.2);">
+            <h1 style="color: white; margin: 0; font-size: 28px;">Nouvelle Réservation</h1>
           </div>
           
           <!-- Contenu -->
@@ -196,9 +197,7 @@ async function sendEmailToClient(clientEmail, message, reservation) {
           
           <!-- Header avec logo -->
           <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 20px; text-align: center;">
-            <div style="background: white; width: 120px; height: 120px; border-radius: 50%; margin: 0 auto 20px; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
-              <div style="font-size: 60px;">🌊</div>
-            </div>
+            <img src="https://raw.githubusercontent.com/Gleekch/restaurant-booking-backend/main/assets/logo.png" alt="Au Murmure des Flots" style="width: 120px; height: 120px; border-radius: 50%; background: white; padding: 10px; margin: 0 auto 20px; display: block; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
             <h1 style="color: white; margin: 0; font-size: 28px; font-weight: 300; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">Au Murmure des Flots</h1>
             <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px; font-style: italic;">Restaurant Gastronomique</p>
           </div>
