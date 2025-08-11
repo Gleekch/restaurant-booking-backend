@@ -114,10 +114,28 @@ const ReservationForm = () => {
       <div className="container mx-auto px-6">
         <div className="text-center mb-12">
           <h2 className="text-4xl font-bold text-teal-800 mb-4">Réserver votre table</h2>
-          <p className="text-gray-600 max-w-2xl mx-auto">
+          <p className="text-gray-600 max-w-2xl mx-auto mb-4">
             Réservez dès maintenant votre table et vivez une expérience culinaire inoubliable 
             dans notre restaurant face à l'océan.
           </p>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 max-w-xl mx-auto">
+            <p className="text-sm text-amber-800 font-medium mb-2">📍 Horaires de réservation :</p>
+            <div className="grid grid-cols-2 gap-4 text-sm text-amber-700">
+              <div>
+                <strong>☀️ Service Midi</strong><br/>
+                Semaine : 12h00 - 13h15<br/>
+                Week-end : 12h00 - 13h45
+              </div>
+              <div>
+                <strong>🌙 Service Soir</strong><br/>
+                Semaine : 18h30 - 21h00<br/>
+                Week-end : 18h30 - 21h30
+              </div>
+            </div>
+            <p className="text-xs text-amber-600 mt-3 italic">
+              Maximum 50 couverts par service • Réservation possible le jour même
+            </p>
+          </div>
         </div>
 
         <Card className="max-w-2xl mx-auto shadow-xl border-0 bg-white/90 backdrop-blur-sm">
@@ -240,7 +258,18 @@ const ReservationForm = () => {
                       <SelectValue placeholder="Choisir l'heure" />
                     </SelectTrigger>
                     <SelectContent>
-                      {timeSlots.map((time) => (
+                      <div className="text-xs text-gray-500 px-2 py-1 font-medium">
+                        {timeSlots.filter(t => parseInt(t.split(':')[0]) < 15).length > 0 && "☀️ Service Midi"}
+                      </div>
+                      {timeSlots.filter(t => parseInt(t.split(':')[0]) < 15).map((time) => (
+                        <SelectItem key={time} value={time}>
+                          {time}
+                        </SelectItem>
+                      ))}
+                      <div className="text-xs text-gray-500 px-2 py-1 font-medium mt-2">
+                        {timeSlots.filter(t => parseInt(t.split(':')[0]) >= 18).length > 0 && "🌙 Service Soir"}
+                      </div>
+                      {timeSlots.filter(t => parseInt(t.split(':')[0]) >= 18).map((time) => (
                         <SelectItem key={time} value={time}>
                           {time}
                         </SelectItem>
