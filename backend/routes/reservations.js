@@ -19,6 +19,43 @@ router.post('/', async (req, res) => {
     const dayOfWeek = reservationDate.getDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     
+    // Vérifier si c'est aujourd'hui et si le service est déjà passé
+    const now = new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    reservationDate.setHours(0, 0, 0, 0);
+    
+    if (reservationDate.getTime() === today.getTime()) {
+      // C'est aujourd'hui, vérifier l'heure actuelle
+      const currentHour = now.getHours();
+      const currentMinutes = now.getMinutes();
+      const currentTimeInMinutes = currentHour * 60 + currentMinutes;
+      
+      // Si on est après 15h, le service du midi est terminé
+      if (timeInMinutes < 900 && currentTimeInMinutes > 900) { // 900 = 15h00
+        return res.status(400).json({
+          success: false,
+          message: 'Le service du midi est terminé pour aujourd\'hui. Veuillez choisir le service du soir ou un autre jour.'
+        });
+      }
+      
+      // Si on est après 23h, le service du soir est terminé
+      if (timeInMinutes >= 1110 && currentTimeInMinutes > 1380) { // 1380 = 23h00
+        return res.status(400).json({
+          success: false,
+          message: 'Le service du soir est terminé pour aujourd\'hui. Veuillez choisir un autre jour.'
+        });
+      }
+      
+      // Empêcher de réserver pour une heure déjà passée
+      if (timeInMinutes < currentTimeInMinutes) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cette heure est déjà passée. Veuillez choisir un créneau ultérieur.'
+        });
+      }
+    }
+    
     // Horaires avec 30 min supplémentaires le week-end
     // Midi: 12h00 à 13h15 (13h45 le week-end)
     const midiMaxTime = isWeekend ? 825 : 795; // 13h45 = 825 min, 13h15 = 795 min

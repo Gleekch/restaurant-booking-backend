@@ -28,7 +28,12 @@ const ReservationForm = () => {
   // Déterminer si la date sélectionnée est un week-end
   const isWeekend = date ? (date.getDay() === 0 || date.getDay() === 6) : false;
   
-  const timeSlots = [
+  // Vérifier si c'est aujourd'hui
+  const isToday = date ? date.toDateString() === new Date().toDateString() : false;
+  const currentHour = new Date().getHours();
+  const currentMinutes = new Date().getMinutes();
+  
+  let allTimeSlots = [
     // Service Midi - dernière arrivée 13h15 (13h45 le week-end)
     "12:00", "12:15", "12:30", "12:45", "13:00", "13:15",
     ...(isWeekend ? ["13:30", "13:45"] : []),
@@ -36,6 +41,27 @@ const ReservationForm = () => {
     "18:30", "18:45", "19:00", "19:15", "19:30", "19:45", "20:00", "20:15", "20:30", "20:45", "21:00",
     ...(isWeekend ? ["21:15", "21:30"] : [])
   ];
+  
+  // Filtrer les créneaux si c'est aujourd'hui
+  const timeSlots = isToday ? allTimeSlots.filter(slot => {
+    const [slotHour, slotMinutes] = slot.split(':').map(Number);
+    
+    // Si on est après 15h, retirer tout le service du midi
+    if (currentHour >= 15 && slotHour < 15) {
+      return false;
+    }
+    
+    // Si on est après 23h, retirer tout
+    if (currentHour >= 23) {
+      return false;
+    }
+    
+    // Retirer les créneaux déjà passés (avec 30 min de marge pour se rendre au restaurant)
+    const currentTotalMinutes = currentHour * 60 + currentMinutes + 30;
+    const slotTotalMinutes = slotHour * 60 + slotMinutes;
+    
+    return slotTotalMinutes >= currentTotalMinutes;
+  }) : allTimeSlots;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
