@@ -25,11 +25,16 @@ const ReservationForm = () => {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
 
+  // Déterminer si la date sélectionnée est un week-end
+  const isWeekend = date ? (date.getDay() === 0 || date.getDay() === 6) : false;
+  
   const timeSlots = [
-    // Service Midi - dernière arrivée 13h15
+    // Service Midi - dernière arrivée 13h15 (13h45 le week-end)
     "12:00", "12:15", "12:30", "12:45", "13:00", "13:15",
-    // Service Soir - dernière arrivée 21h00
-    "18:30", "18:45", "19:00", "19:15", "19:30", "19:45", "20:00", "20:15", "20:30", "20:45", "21:00"
+    ...(isWeekend ? ["13:30", "13:45"] : []),
+    // Service Soir - dernière arrivée 21h00 (21h30 le week-end)
+    "18:30", "18:45", "19:00", "19:15", "19:30", "19:45", "20:00", "20:15", "20:30", "20:45", "21:00",
+    ...(isWeekend ? ["21:15", "21:30"] : [])
   ];
 
   const handleSubmit = async (e: React.FormEvent) => {

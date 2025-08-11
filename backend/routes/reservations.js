@@ -14,15 +14,26 @@ router.post('/', async (req, res) => {
     const [hours, minutes] = time.split(':').map(Number);
     const timeInMinutes = hours * 60 + minutes;
     
-    // Midi: 12h00 à 13h15 (720 à 795 minutes)
-    const isMidi = timeInMinutes >= 720 && timeInMinutes <= 795;
-    // Soir: 18h30 à 21h00 (1110 à 1260 minutes)
-    const isSoir = timeInMinutes >= 1110 && timeInMinutes <= 1260;
+    // Vérifier si c'est le week-end (samedi = 6, dimanche = 0)
+    const reservationDate = new Date(date);
+    const dayOfWeek = reservationDate.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    
+    // Horaires avec 30 min supplémentaires le week-end
+    // Midi: 12h00 à 13h15 (13h45 le week-end)
+    const midiMaxTime = isWeekend ? 825 : 795; // 13h45 = 825 min, 13h15 = 795 min
+    const isMidi = timeInMinutes >= 720 && timeInMinutes <= midiMaxTime;
+    
+    // Soir: 18h30 à 21h00 (21h30 le week-end)
+    const soirMaxTime = isWeekend ? 1290 : 1260; // 21h30 = 1290 min, 21h00 = 1260 min
+    const isSoir = timeInMinutes >= 1110 && timeInMinutes <= soirMaxTime;
     
     if (!isMidi && !isSoir) {
+      const midiLimit = isWeekend ? '13h45' : '13h15';
+      const soirLimit = isWeekend ? '21h30' : '21h00';
       return res.status(400).json({
         success: false,
-        message: 'Les réservations sont possibles de 12h00 à 13h15 (midi) ou de 18h30 à 21h00 (soir)'
+        message: `Les réservations sont possibles de 12h00 à ${midiLimit} (midi) ou de 18h30 à ${soirLimit} (soir)`
       });
     }
     
