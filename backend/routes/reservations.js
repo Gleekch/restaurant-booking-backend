@@ -108,18 +108,19 @@ router.post('/', async (req, res) => {
     const reservation = new Reservation(req.body);
     await reservation.save();
     
-    // Notifier l'application desktop via WebSocket IMMÉDIATEMENT
+    // Envoyer les notifications email/SMS d'abord (important pour le client)
+    try {
+      await sendNotifications(reservation);
+      console.log('Notifications envoyées avec succès');
+    } catch (err) {
+      console.error('Erreur envoi notifications:', err);
+      // L'erreur n'empêche pas la réservation d'être créée
+    }
+    
+    // Notifier l'application desktop via WebSocket après
     const io = req.app.get('io');
     console.log('Émission de new-reservation via Socket.IO pour:', reservation.customerName);
     io.emit('new-reservation', reservation);
-    
-    // Envoyer les notifications email/SMS (important pour le client)
-    sendNotifications(reservation).then(() => {
-      console.log('Notifications envoyées avec succès');
-    }).catch(err => {
-      console.error('Erreur envoi notifications:', err);
-      // L'erreur n'empêche pas la réservation d'être créée
-    });
     
     res.status(201).json({
       success: true,
