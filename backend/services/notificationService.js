@@ -269,13 +269,13 @@ async function sendEmailToClient(clientEmail, message, reservation) {
             <!-- Contact -->
             <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e0e0e0;">
               <p style="color: #666; font-size: 14px; margin: 5px 0;">
-                📞 Téléphone : +262 692 504 049
+                📞 Téléphone : 02 62 26 67 19
               </p>
               <p style="color: #666; font-size: 14px; margin: 5px 0;">
                 📧 Email : aumurmuredesflots@gmail.com
               </p>
               <p style="color: #666; font-size: 14px; margin: 5px 0;">
-                📍 Adresse : La Réunion
+                📍 Adresse : 44 rue du Général Lambert, 97436 Saint-Leu
               </p>
             </div>
           </div>
@@ -286,9 +286,9 @@ async function sendEmailToClient(clientEmail, message, reservation) {
               "Où chaque repas devient un voyage culinaire"
             </p>
             <div style="margin-top: 20px;">
-              <a href="https://resa-aumurmuredesflots.onrender.com" style="color: #3498db; text-decoration: none; font-size: 14px;">Modifier ma réservation</a>
+              <a href="https://resa-aumurmuredesflots.onrender.com" style="color: #3498db; text-decoration: none; font-size: 14px;">Nouvelle réservation</a>
               <span style="color: #7f8c8d; margin: 0 10px;">|</span>
-              <a href="https://wa.me/262692504049" style="color: #25d366; text-decoration: none; font-size: 14px;">WhatsApp</a>
+              <a href="tel:0262266719" style="color: #3498db; text-decoration: none; font-size: 14px;">Nous appeler</a>
             </div>
             <p style="color: #7f8c8d; margin: 20px 0 0 0; font-size: 12px;">
               © 2024 Au Murmure des Flots - Tous droits réservés
