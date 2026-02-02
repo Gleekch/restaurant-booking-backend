@@ -4,17 +4,21 @@ const nodemailer = require('nodemailer');
 let twilioClient = null;
 
 // Configuration Email
+const emailPort = parseInt(process.env.EMAIL_PORT) || 465;
 const emailTransporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: process.env.EMAIL_PORT,
-  secure: false,
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: emailPort,
+  secure: emailPort === 465, // true pour port 465, false pour 587
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
   tls: {
-    rejectUnauthorized: false // Accepter les certificats auto-signés
-  }
+    rejectUnauthorized: false
+  },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000
 });
 
 // Fonction pour envoyer les notifications
