@@ -685,24 +685,25 @@ function displayWeekView() {
                 const dayData = reservationsByDay[dayStr];
                 const dayName = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'][day.getDay()];
                 const isToday = dayStr === today.toDateString();
-                
+                const dateISO = day.toISOString().split('T')[0];
+
                 const midiCount = dayData.midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
                 const soirCount = dayData.soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
-                
+
                 return `
                     <div style="background: ${isToday ? '#e3f2fd' : 'white'}; border-radius: 10px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
                         <h3 style="text-align: center; color: #147c7f; margin-bottom: 10px;">
                             ${dayName}<br>
                             <small>${day.getDate()}/${day.getMonth() + 1}</small>
                         </h3>
-                        <div style="margin-bottom: 10px; padding: 10px; background: #fff3cd; border-radius: 5px;">
+                        <div class="week-service-card" data-date="${dateISO}" data-service="midi" style="margin-bottom: 10px; padding: 10px; background: #fff3cd; border-radius: 5px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;">
                             <strong>☀️ Midi</strong><br>
                             ${dayData.midi.length} rés. / ${midiCount} couv.<br>
                             <div style="width: 100%; background: #e9ecef; height: 10px; border-radius: 5px; margin-top: 5px;">
                                 <div style="width: ${(midiCount/50)*100}%; background: ${midiCount >= 50 ? '#dc3545' : midiCount >= 40 ? '#ffc107' : '#28a745'}; height: 10px; border-radius: 5px;"></div>
                             </div>
                         </div>
-                        <div style="padding: 10px; background: #d1ecf1; border-radius: 5px;">
+                        <div class="week-service-card" data-date="${dateISO}" data-service="soir" style="padding: 10px; background: #d1ecf1; border-radius: 5px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;">
                             <strong>🌙 Soir</strong><br>
                             ${dayData.soir.length} rés. / ${soirCount} couv.<br>
                             <div style="width: 100%; background: #e9ecef; height: 10px; border-radius: 5px; margin-top: 5px;">
@@ -714,7 +715,24 @@ function displayWeekView() {
             }).join('')}
         </div>
     `;
-    
+
+    // Ajouter les événements de clic sur les cartes
+    document.querySelectorAll('.week-service-card').forEach(card => {
+        card.addEventListener('mouseenter', () => {
+            card.style.transform = 'scale(1.05)';
+            card.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+        });
+        card.addEventListener('mouseleave', () => {
+            card.style.transform = 'scale(1)';
+            card.style.boxShadow = 'none';
+        });
+        card.addEventListener('click', () => {
+            const date = card.dataset.date;
+            const service = card.dataset.service;
+            showDayServiceReservations(date, service);
+        });
+    });
+
     document.getElementById('reservations-title').textContent = '📆 Planning de la Semaine';
 }
 
@@ -817,6 +835,112 @@ function displayStatistics() {
     `;
     
     document.getElementById('reservations-title').textContent = '📊 Statistiques';
+}
+
+// Afficher les réservations d'un jour et service spécifique (depuis le planning semaine)
+function showDayServiceReservations(dateISO, service) {
+    const weekSection = document.getElementById('week-section');
+    const reservationsContainer = document.getElementById('reservations-container');
+
+    // Masquer la vue semaine, afficher les réservations
+    weekSection.style.display = 'none';
+    reservationsContainer.style.display = 'block';
+
+    const selectedDate = new Date(dateISO);
+    const dayReservations = reservations.filter(r => {
+        const resDate = new Date(r.date);
+        return resDate.toDateString() === selectedDate.toDateString();
+    });
+
+    // Filtrer par service
+    const filteredReservations = dayReservations.filter(r => {
+        const hour = parseInt(r.time.split(':')[0]);
+        if (service === 'midi') {
+            return hour < 15;
+        } else {
+            return hour >= 15;
+        }
+    });
+
+    // Trier par heure
+    filteredReservations.sort((a, b) => {
+        const timeA = a.time.split(':').map(Number);
+        const timeB = b.time.split(':').map(Number);
+        return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
+    });
+
+    const serviceName = service === 'midi' ? '☀️ Midi' : '🌙 Soir';
+    const dateFormatted = selectedDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+    const totalCovers = filteredReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
+
+    // Mettre à jour le titre
+    document.getElementById('reservations-title').textContent = `${serviceName} - ${dateFormatted}`;
+
+    // Afficher les réservations
+    reservationsContainer.innerHTML = `
+        <div style="margin-bottom: 20px;">
+            <button id="back-to-week-btn" style="background: #147c7f; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-bottom: 15px;">
+                ← Retour au planning
+            </button>
+            <div style="background: ${service === 'midi' ? '#fff3cd' : '#d1ecf1'}; padding: 15px; border-radius: 10px;">
+                <h3>${serviceName} - ${dateFormatted}</h3>
+                <p style="font-size: 20px; font-weight: bold;">${totalCovers} couverts / ${filteredReservations.length} réservations</p>
+            </div>
+        </div>
+        ${filteredReservations.length === 0 ? `
+            <div style="text-align: center; padding: 40px; color: #666;">
+                <p style="font-size: 18px;">Aucune réservation pour ce service</p>
+            </div>
+        ` : `
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
+                ${filteredReservations.map(reservation => `
+                    <div class="reservation-card clickable-card" data-id="${reservation._id}" style="cursor: pointer;">
+                        <div class="reservation-header">
+                            <div class="reservation-time">${reservation.time}</div>
+                            <span class="reservation-status status-${reservation.status}">${getStatusText(reservation.status)}</span>
+                        </div>
+                        <div class="reservation-info">
+                            <div class="info-row">
+                                <span class="info-label">Nom:</span>
+                                <strong>${reservation.customerName}</strong>
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Téléphone:</span>
+                                ${reservation.phoneNumber}
+                            </div>
+                            <div class="info-row">
+                                <span class="info-label">Personnes:</span>
+                                ${reservation.numberOfPeople}
+                            </div>
+                            ${reservation.specialRequests ? `
+                            <div class="info-row">
+                                <span class="info-label">Notes:</span>
+                                ${reservation.specialRequests}
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `}
+    `;
+
+    // Bouton retour
+    document.getElementById('back-to-week-btn').addEventListener('click', () => {
+        currentView = 'week';
+        displayWeekView();
+    });
+
+    // Clic sur les cartes de réservation
+    document.querySelectorAll('.clickable-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const resId = card.dataset.id;
+            const reservation = reservations.find(r => r._id === resId);
+            if (reservation) {
+                showReservationDetails(reservation);
+            }
+        });
+    });
 }
 
 // Vue Aujourd'hui améliorée
