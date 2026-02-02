@@ -112,6 +112,9 @@ function displayReservations() {
     } else if (currentView === 'statistics') {
         displayStatistics();
         return;
+    } else if (currentView === 'pending') {
+        displayPendingReservations();
+        return;
     }
     
     let filteredReservations = reservations;
@@ -943,6 +946,161 @@ function showDayServiceReservations(dateISO, service) {
     });
 }
 
+// Vue À confirmer - Toutes les réservations en attente
+function displayPendingReservations() {
+    const pendingSection = document.getElementById('pending-section');
+    const pendingContainer = document.getElementById('pending-container');
+    const reservationsContainer = document.getElementById('reservations-container');
+
+    reservationsContainer.style.display = 'none';
+    pendingSection.style.display = 'block';
+
+    // Filtrer les réservations en attente (futures uniquement)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const pendingReservations = reservations.filter(r => {
+        const resDate = new Date(r.date);
+        resDate.setHours(0, 0, 0, 0);
+        return r.status === 'pending' && resDate >= today;
+    });
+
+    // Trier par date puis par heure
+    pendingReservations.sort((a, b) => {
+        const dateA = new Date(a.date);
+        const dateB = new Date(b.date);
+        if (dateA.getTime() !== dateB.getTime()) {
+            return dateA - dateB;
+        }
+        const timeA = a.time.split(':').map(Number);
+        const timeB = b.time.split(':').map(Number);
+        return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
+    });
+
+    const totalCovers = pendingReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
+
+    pendingContainer.innerHTML = `
+        <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="background: #fff3cd; padding: 15px 25px; border-radius: 10px; border-left: 5px solid #ffc107;">
+                <h3 style="margin: 0; color: #856404;">⏳ Réservations en attente</h3>
+                <p style="margin: 5px 0 0 0; font-size: 18px;"><strong>${pendingReservations.length}</strong> réservations / <strong>${totalCovers}</strong> couverts</p>
+            </div>
+            ${pendingReservations.length > 0 ? `
+                <button id="confirm-all-btn" style="background: #28a745; color: white; border: none; padding: 15px 30px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; transition: background 0.2s;">
+                    ✅ Tout confirmer (${pendingReservations.length})
+                </button>
+            ` : ''}
+        </div>
+
+        ${pendingReservations.length === 0 ? `
+            <div style="text-align: center; padding: 60px; color: #666; background: #f8f9fa; border-radius: 10px;">
+                <p style="font-size: 48px; margin: 0;">🎉</p>
+                <p style="font-size: 20px; margin: 15px 0 0 0;">Aucune réservation en attente !</p>
+                <p style="font-size: 14px; color: #999;">Toutes les réservations ont été traitées.</p>
+            </div>
+        ` : `
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px;">
+                ${pendingReservations.map(reservation => {
+                    const resDate = new Date(reservation.date);
+                    const dateStr = resDate.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+                    const hour = parseInt(reservation.time.split(':')[0]);
+                    const service = hour < 15 ? '☀️ Midi' : '🌙 Soir';
+
+                    return `
+                        <div class="pending-card" data-id="${reservation._id}" style="background: white; border-radius: 10px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #ffc107; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                <span style="font-weight: bold; font-size: 16px;">${reservation.customerName}</span>
+                                <span style="background: #fff3cd; color: #856404; padding: 3px 10px; border-radius: 15px; font-size: 12px;">En attente</span>
+                            </div>
+                            <div style="color: #666; font-size: 14px;">
+                                <p style="margin: 5px 0;">📅 ${dateStr} - ${reservation.time} ${service}</p>
+                                <p style="margin: 5px 0;">👥 ${reservation.numberOfPeople} personne${reservation.numberOfPeople > 1 ? 's' : ''}</p>
+                                <p style="margin: 5px 0;">📱 ${reservation.phoneNumber}</p>
+                                ${reservation.specialRequests ? `<p style="margin: 5px 0; font-style: italic;">💬 ${reservation.specialRequests}</p>` : ''}
+                            </div>
+                            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                                <button class="confirm-single-btn" data-id="${reservation._id}" style="flex: 1; background: #28a745; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer;">✅ Confirmer</button>
+                                <button class="cancel-single-btn" data-id="${reservation._id}" style="flex: 1; background: #dc3545; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer;">❌ Annuler</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `}
+    `;
+
+    // Bouton tout confirmer
+    const confirmAllBtn = document.getElementById('confirm-all-btn');
+    if (confirmAllBtn) {
+        confirmAllBtn.addEventListener('mouseenter', () => {
+            confirmAllBtn.style.background = '#218838';
+        });
+        confirmAllBtn.addEventListener('mouseleave', () => {
+            confirmAllBtn.style.background = '#28a745';
+        });
+        confirmAllBtn.addEventListener('click', async () => {
+            if (confirm(`Confirmer les ${pendingReservations.length} réservations en attente ?`)) {
+                confirmAllBtn.disabled = true;
+                confirmAllBtn.textContent = '⏳ Confirmation en cours...';
+
+                let successCount = 0;
+                for (const reservation of pendingReservations) {
+                    try {
+                        const response = await fetch(`https://restaurant-booking-backend-y3sp.onrender.com/api/reservations/${reservation._id}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ status: 'confirmed' })
+                        });
+                        if (response.ok) successCount++;
+                    } catch (error) {
+                        console.error('Erreur confirmation:', error);
+                    }
+                }
+
+                showNotification('Succès', `${successCount} réservation(s) confirmée(s)`);
+                loadReservations();
+            }
+        });
+    }
+
+    // Boutons individuels confirmer/annuler
+    document.querySelectorAll('.confirm-single-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            updateReservationStatus(btn.dataset.id, 'confirmed');
+        });
+    });
+
+    document.querySelectorAll('.cancel-single-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm('Annuler cette réservation ?')) {
+                updateReservationStatus(btn.dataset.id, 'cancelled');
+            }
+        });
+    });
+
+    // Clic sur les cartes pour voir les détails
+    document.querySelectorAll('.pending-card').forEach(card => {
+        card.addEventListener('mouseenter', () => {
+            card.style.transform = 'translateY(-2px)';
+            card.style.boxShadow = '0 4px 15px rgba(0,0,0,0.15)';
+        });
+        card.addEventListener('mouseleave', () => {
+            card.style.transform = 'translateY(0)';
+            card.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+        });
+        card.addEventListener('click', () => {
+            const reservation = reservations.find(r => r._id === card.dataset.id);
+            if (reservation) {
+                showReservationDetails(reservation);
+            }
+        });
+    });
+
+    document.getElementById('reservations-title').textContent = '⏳ À confirmer';
+}
+
 // Vue Aujourd'hui améliorée
 function displayTodayView() {
     const reservationsContainer = document.getElementById('reservations-container');
@@ -1052,13 +1210,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const clientsSection = document.getElementById('clients-section');
             const weekSection = document.getElementById('week-section');
             const statsSection = document.getElementById('statistics-section');
+            const pendingSection = document.getElementById('pending-section');
             const reservationsContainer = document.getElementById('reservations-container');
             const filters = document.querySelector('.filters');
-            
+
             clientsSection.style.display = 'none';
             weekSection.style.display = 'none';
             statsSection.style.display = 'none';
-            
+            pendingSection.style.display = 'none';
+
             if (view === 'clients') {
                 reservationsContainer.style.display = 'none';
                 clientsSection.style.display = 'block';
@@ -1074,6 +1234,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 statsSection.style.display = 'block';
                 if (filters) filters.style.display = 'none';
                 displayStatistics();
+            } else if (view === 'pending') {
+                reservationsContainer.style.display = 'none';
+                pendingSection.style.display = 'block';
+                if (filters) filters.style.display = 'none';
+                displayPendingReservations();
             } else if (view === 'today') {
                 reservationsContainer.style.display = 'block';
                 if (filters) filters.style.display = 'flex';
