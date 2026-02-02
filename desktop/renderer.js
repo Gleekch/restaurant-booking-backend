@@ -510,16 +510,16 @@ document.querySelectorAll('nav a').forEach(link => {
 // Fonction pour extraire et analyser les clients
 function extractClients() {
     const clientsMap = new Map();
-    
+
     reservations.forEach(reservation => {
-        const key = reservation.email || reservation.phone;
+        const key = reservation.email || reservation.phoneNumber || reservation.phone;
         if (!key) return;
-        
+
         if (!clientsMap.has(key)) {
             clientsMap.set(key, {
                 name: reservation.customerName,
                 email: reservation.email || '',
-                phone: reservation.phone || '',
+                phone: reservation.phoneNumber || reservation.phone || '',
                 firstVisit: reservation.date,
                 lastVisit: reservation.date,
                 totalVisits: 0,
@@ -532,6 +532,11 @@ function extractClients() {
         client.totalVisits++;
         client.totalCovers += reservation.numberOfPeople;
         client.reservations.push(reservation);
+
+        // Mettre à jour le téléphone si manquant
+        if (!client.phone && (reservation.phoneNumber || reservation.phone)) {
+            client.phone = reservation.phoneNumber || reservation.phone;
+        }
         
         // Mettre à jour première et dernière visite
         if (new Date(reservation.date) < new Date(client.firstVisit)) {
