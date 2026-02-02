@@ -45,7 +45,13 @@ async function loadReservations() {
         const response = await fetch(`${API_URL}/api/reservations`);
         if (!response.ok) throw new Error('Erreur réseau');
 
-        reservations = await response.json();
+        const data = await response.json();
+        // L'API retourne { success: true, data: [...] }
+        if (data.success) {
+            reservations = data.data;
+        } else {
+            reservations = Array.isArray(data) ? data : [];
+        }
         updateConnectionStatus(true);
         updatePendingBadge();
         renderView();
