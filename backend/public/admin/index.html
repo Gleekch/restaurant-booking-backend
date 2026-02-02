@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#147c7f">
+    <title>Au Murmure des Flots - Gestion</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <div class="header-content">
+                <h1>Au Murmure des Flots</h1>
+                <div class="connection-status" id="connection-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connexion...</span>
+                </div>
+            </div>
+        </header>
+
+        <nav class="bottom-nav">
+            <a href="#" data-view="today" class="nav-item active">
+                <span class="nav-icon">📅</span>
+                <span class="nav-label">Aujourd'hui</span>
+            </a>
+            <a href="#" data-view="pending" class="nav-item">
+                <span class="nav-icon">⏳</span>
+                <span class="nav-label">À confirmer</span>
+                <span class="badge" id="pending-badge" style="display: none;">0</span>
+            </a>
+            <a href="#" data-view="week" class="nav-item">
+                <span class="nav-icon">📆</span>
+                <span class="nav-label">Semaine</span>
+            </a>
+            <a href="#" data-view="new" class="nav-item nav-add">
+                <span class="nav-icon">➕</span>
+                <span class="nav-label">Nouveau</span>
+            </a>
+        </nav>
+
+        <main id="main-content">
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Chargement des réservations...</p>
+            </div>
+            <div id="content"></div>
+        </main>
+
+        <!-- Modal détails réservation -->
+        <div id="reservation-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="modal-title">Détails</h2>
+                    <button class="close-btn" onclick="closeModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="modal-body"></div>
+            </div>
+        </div>
+
+        <!-- Modal nouvelle réservation -->
+        <div id="new-reservation-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Nouvelle Réservation</h2>
+                    <button class="close-btn" onclick="closeNewModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="new-reservation-form">
+                        <div class="form-group">
+                            <label for="customerName">Nom du client *</label>
+                            <input type="text" id="customerName" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="phoneNumber">Téléphone *</label>
+                            <input type="tel" id="phoneNumber" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email</label>
+                            <input type="email" id="email">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="date">Date *</label>
+                                <input type="date" id="date" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="time">Heure *</label>
+                                <input type="time" id="time" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="numberOfPeople">Nombre de personnes *</label>
+                            <input type="number" id="numberOfPeople" min="1" max="20" value="2" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="specialRequests">Notes / Demandes spéciales</label>
+                            <textarea id="specialRequests" rows="3"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-full">Créer la réservation</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

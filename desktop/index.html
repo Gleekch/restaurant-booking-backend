@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' http://localhost:3000 ws://localhost:3000 https://restaurant-booking-backend-y3sp.onrender.com wss://restaurant-booking-backend-y3sp.onrender.com;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self' http://localhost:3000 ws://localhost:3000 https://restaurant-booking-backend-y3sp.onrender.com wss://restaurant-booking-backend-y3sp.onrender.com;">
     <title>Système de Réservation - Restaurant</title>
     <link rel="stylesheet" href="styles.css">
 </head>
@@ -52,6 +52,12 @@
                         <span class="stat-label">Confirmées:</span>
                         <span class="stat-value" id="today-confirmed">0</span>
                     </div>
+                </div>
+
+                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #ddd;">
+                    <button id="show-qr-btn" style="width: 100%; padding: 12px; background: linear-gradient(135deg, #147c7f, #0d5a5c); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                        📱 Accès Tablette
+                    </button>
                 </div>
             </aside>
 
@@ -217,6 +223,22 @@
                     <button id="cancel-btn" class="btn btn-danger">Annuler</button>
                     <button id="edit-btn" class="btn btn-primary">Modifier</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Modal QR Code pour accès tablette -->
+        <div id="qr-modal" class="modal">
+            <div class="modal-content" style="max-width: 400px; text-align: center;">
+                <span class="close-qr-modal" style="float: right; font-size: 28px; cursor: pointer;">&times;</span>
+                <h2 style="margin-bottom: 10px;">📱 Accès Tablette</h2>
+                <p style="color: #666; margin-bottom: 20px;">Scannez ce QR code avec votre tablette pour accéder au tableau de bord</p>
+                <div id="qr-code-container" style="background: white; padding: 20px; border-radius: 10px; display: inline-block; margin-bottom: 20px;">
+                    <img id="qr-code-img" src="" alt="QR Code" style="width: 200px; height: 200px;">
+                </div>
+                <p style="font-size: 12px; color: #999; word-break: break-all;" id="admin-url-display"></p>
+                <button id="copy-url-btn" style="margin-top: 15px; padding: 10px 20px; background: #147c7f; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                    📋 Copier l'URL
+                </button>
             </div>
         </div>
     </div>

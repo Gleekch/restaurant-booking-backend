@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create Icons</title>
+</head>
+<body>
+    <canvas id="canvas192" width="192" height="192"></canvas>
+    <canvas id="canvas512" width="512" height="512"></canvas>
+    <script>
+        function createIcon(canvasId, size) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+
+            // Background circle
+            ctx.fillStyle = '#147c7f';
+            ctx.beginPath();
+            ctx.arc(size/2, size/2, size/2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Wave pattern
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = size * 0.05;
+            ctx.lineCap = 'round';
+
+            // Draw waves
+            for (let i = 0; i < 3; i++) {
+                ctx.beginPath();
+                const y = size * 0.35 + (i * size * 0.15);
+                ctx.moveTo(size * 0.2, y);
+                ctx.quadraticCurveTo(size * 0.35, y - size * 0.08, size * 0.5, y);
+                ctx.quadraticCurveTo(size * 0.65, y + size * 0.08, size * 0.8, y);
+                ctx.stroke();
+            }
+
+            // Text "R"
+            ctx.fillStyle = '#ffffff';
+            ctx.font = `bold ${size * 0.25}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('R', size/2, size * 0.72);
+
+            return canvas.toDataURL('image/png');
+        }
+
+        // Create and download
+        const link192 = document.createElement('a');
+        link192.download = 'icon-192.png';
+        link192.href = createIcon('canvas192', 192);
+
+        const link512 = document.createElement('a');
+        link512.download = 'icon-512.png';
+        link512.href = createIcon('canvas512', 512);
+
+        document.body.innerHTML += '<p>Right-click and save:</p>';
+        document.body.innerHTML += '<p><a href="' + link192.href + '" download="icon-192.png">icon-192.png</a></p>';
+        document.body.innerHTML += '<p><a href="' + link512.href + '" download="icon-512.png">icon-512.png</a></p>';
+    </script>
+</body>
+</html>

@@ -1360,7 +1360,51 @@ document.addEventListener('DOMContentLoaded', () => {
             newReservationForm.reset();
         }
     });
-    
+
+    // QR Code pour accès tablette
+    const qrModal = document.getElementById('qr-modal');
+    const showQrBtn = document.getElementById('show-qr-btn');
+    const closeQrModal = document.querySelector('.close-qr-modal');
+    const qrCodeImg = document.getElementById('qr-code-img');
+    const adminUrlDisplay = document.getElementById('admin-url-display');
+    const copyUrlBtn = document.getElementById('copy-url-btn');
+
+    const ADMIN_URL = 'https://restaurant-booking-backend-y3sp.onrender.com/admin/';
+
+    if (showQrBtn) {
+        showQrBtn.addEventListener('click', () => {
+            // Générer le QR code via API
+            const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(ADMIN_URL)}`;
+            qrCodeImg.src = qrApiUrl;
+            adminUrlDisplay.textContent = ADMIN_URL;
+            qrModal.style.display = 'block';
+        });
+    }
+
+    if (closeQrModal) {
+        closeQrModal.addEventListener('click', () => {
+            qrModal.style.display = 'none';
+        });
+    }
+
+    if (copyUrlBtn) {
+        copyUrlBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(ADMIN_URL).then(() => {
+                copyUrlBtn.textContent = '✅ Copié !';
+                setTimeout(() => {
+                    copyUrlBtn.textContent = '📋 Copier l\'URL';
+                }, 2000);
+            });
+        });
+    }
+
+    // Fermer le QR modal en cliquant en dehors
+    window.addEventListener('click', (event) => {
+        if (event.target === qrModal) {
+            qrModal.style.display = 'none';
+        }
+    });
+
     // Charger les réservations au démarrage
     console.log('Chargement des réservations au démarrage...');
     loadReservations();
