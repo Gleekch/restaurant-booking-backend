@@ -125,8 +125,9 @@ router.post('/availability', async (req, res) => {
   });
 });
 
-// Mettre à jour les paramètres (protégé par authentification dans un cas réel)
-router.put('/', (req, res) => {
+// Mettre à jour les paramètres (protégé par API key)
+const { apiKey } = require('../middleware/auth');
+router.put('/', apiKey, (req, res) => {
   settings = { ...settings, ...req.body };
   res.json({
     success: true,

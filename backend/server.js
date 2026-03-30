@@ -10,46 +10,47 @@ require('dotenv').config();
 
 const app = express();
 const server = http.createServer(app);
+
+// CORS — whitelist stricte
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://www.aumurmuredesflots.com',
+  'https://aumurmuredesflots.com',
+  'https://resa-aumurmuredesflots.onrender.com',
+  'https://restaurant-booking-backend-y3sp.onrender.com'
+];
+
 const io = socketIo(server, {
   cors: {
-    origin: "*", // Accepter toutes les origines pour l'application desktop
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PUT", "DELETE"]
   }
 });
 
-// Middleware
 app.use(cors({
   origin: function(origin, callback) {
-    // Autoriser les requêtes sans origine (Electron, Postman, etc.)
+    // Autoriser les requêtes sans origine (Electron, curl, Postman)
     if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001', 
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'https://your-dinner-spot.onrender.com',
-      'https://resa-aumurmuredesflots.onrender.com',
-      'https://restaurant-booking-backend-y3sp.onrender.com'
-    ];
-    
-    // Autoriser aussi les requêtes depuis file:// (Electron)
     if (origin.startsWith('file://') || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(null, true); // Pour l'instant, autoriser toutes les origines
+      callback(new Error('CORS non autorisé'), false);
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting — anti-spam sur la création de réservations publiques
 const reservationLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // max 20 réservations par IP par fenêtre
+  windowMs: 15 * 60 * 1000,
+  max: 20,
   message: { success: false, message: 'Trop de requêtes, réessayez dans 15 minutes' }
 });
 
@@ -66,30 +67,36 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/restauran
   console.error('MongoDB connection error:', err);
 });
 
-// Routes publiques (avec rate limiting)
+// ─── Routes publiques ───
+// POST /api/reservations (site web) — rate limited, pas d'API key
 app.post('/api/reservations', reservationLimiter);
+// GET /api/reservations/availability — public (calendrier client)
+// Les routes internes (GET list, POST /desktop, PUT, DELETE) sont protégées dans le router
 app.use('/api/reservations', require('./routes/reservations'));
+
+// Menu et WhatsApp — publics
 app.use('/api/menu', require('./routes/menu'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
 
-// Routes protégées (API key requise)
+// ─── Routes protégées (API key requise) ───
 app.use('/api/notifications', apiKey, require('./routes/notifications'));
 app.use('/api/voice', apiKey, require('./routes/voice'));
-app.use('/api/settings', apiKey, require('./routes/settings'));
 
-// WebSocket pour l'application desktop
+// Settings — routes publiques séparées des routes protégées
+const settingsRouter = require('./routes/settings');
+app.use('/api/settings', settingsRouter);
+
+// WebSocket
 io.on('connection', (socket) => {
   console.log('Desktop app connected');
-  
   socket.on('disconnect', () => {
     console.log('Desktop app disconnected');
   });
 });
 
-// Export io pour utilisation dans les routes
 app.set('io', io);
 
-// Démarrer le scheduler de rappels après connexion MongoDB
+// Scheduler de rappels
 const { startReminderScheduler } = require('./services/reminderService');
 
 const PORT = process.env.PORT || 3000;

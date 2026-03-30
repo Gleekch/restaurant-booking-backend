@@ -3,9 +3,10 @@ const router = express.Router();
 const Reservation = require('../models/Reservation');
 const { sendNotifications } = require('../services/notificationService');
 const { checkAvailability, CAPACITY } = require('../services/capacityService');
+const { apiKey } = require('../middleware/auth');
 
-// Créer une réservation depuis l'application desktop (capacité complète du restaurant)
-router.post('/desktop', async (req, res) => {
+// Créer une réservation depuis l'application desktop (protégé par API key)
+router.post('/desktop', apiKey, async (req, res) => {
   try {
     const { date, time, numberOfPeople } = req.body;
 
@@ -178,8 +179,8 @@ router.get('/availability', async (req, res) => {
   }
 });
 
-// Obtenir toutes les réservations
-router.get('/', async (req, res) => {
+// Obtenir toutes les réservations (protégé)
+router.get('/', apiKey, async (req, res) => {
   try {
     const { date, status } = req.query;
     let query = {};
@@ -209,7 +210,7 @@ router.get('/', async (req, res) => {
 });
 
 // Obtenir une réservation par ID
-router.get('/:id', async (req, res) => {
+router.get('/:id', apiKey, async (req, res) => {
   try {
     const reservation = await Reservation.findById(req.params.id);
     if (!reservation) {
@@ -231,40 +232,69 @@ router.get('/:id', async (req, res) => {
 });
 
 // Mettre à jour une réservation
-router.put('/:id', async (req, res) => {
+router.put('/:id', apiKey, async (req, res) => {
   try {
+    const existing = await Reservation.findById(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ success: false, message: 'Réservation non trouvée' });
+    }
+
+    // Empêcher la modification d'une réservation annulée ou terminée
+    if (existing.status === 'cancelled' || existing.status === 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: `Impossible de modifier une réservation ${existing.status === 'cancelled' ? 'annulée' : 'terminée'}`
+      });
+    }
+
+    const { date, time, numberOfPeople } = req.body;
+    const dateChanged = date && date !== existing.date.toISOString().split('T')[0];
+    const timeChanged = time && time !== existing.time;
+    const peopleChanged = numberOfPeople && numberOfPeople !== existing.numberOfPeople;
+
+    // Revalider la capacité si date, heure ou nombre de personnes changent
+    if (dateChanged || timeChanged || peopleChanged) {
+      const checkDate = date || existing.date.toISOString().split('T')[0];
+      const checkTime = time || existing.time;
+      const checkPeople = numberOfPeople || existing.numberOfPeople;
+
+      // Simuler la suppression de l'ancienne réservation pour le check
+      // On vérifie la capacité SANS compter la réservation actuelle
+      const oldStatus = existing.status;
+      existing.status = 'cancelled'; // temporairement exclue du calcul
+      await existing.save();
+
+      const availability = await checkAvailability(checkDate, checkTime, checkPeople, CAPACITY);
+
+      // Restaurer le statut original
+      existing.status = oldStatus;
+      await existing.save();
+
+      if (!availability.available) {
+        return res.status(400).json({
+          success: false,
+          message: `Créneau complet à ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts)`
+        });
+      }
+    }
+
     const reservation = await Reservation.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
     );
-    
-    if (!reservation) {
-      return res.status(404).json({
-        success: false,
-        message: 'Réservation non trouvée'
-      });
-    }
-    
-    // Notifier l'application desktop
+
     const io = req.app.get('io');
     io.emit('update-reservation', reservation);
-    
-    res.json({
-      success: true,
-      message: 'Réservation mise à jour',
-      data: reservation
-    });
+
+    res.json({ success: true, message: 'Réservation mise à jour', data: reservation });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message
-    });
+    res.status(400).json({ success: false, message: error.message });
   }
 });
 
 // Annuler une réservation
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', apiKey, async (req, res) => {
   try {
     const reservation = await Reservation.findByIdAndUpdate(
       req.params.id,
