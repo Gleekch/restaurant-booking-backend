@@ -33,6 +33,7 @@
                         <li><a href="#" data-view="today" class="active">📅 Aujourd'hui</a></li>
                         <li><a href="#" data-view="pending">⏳ À confirmer</a></li>
                         <li><a href="#" data-view="week">📆 Cette semaine</a></li>
+                        <li><a href="#" data-view="month">🗓️ Ce mois</a></li>
                         <li><a href="#" data-view="clients">👥 Clients</a></li>
                         <li><a href="#" data-view="statistics">📊 Statistiques</a></li>
                     </ul>
@@ -105,6 +106,24 @@
                         <!-- Planning de la semaine -->
                     </div>
                 </div>
+
+                <div id="pending-section" style="display: none;">
+                    <div id="pending-container">
+                        <!-- Réservations à confirmer -->
+                    </div>
+                </div>
+
+                <div id="month-section" style="display: none;">
+                    <div id="month-container">
+                        <!-- Planning du mois -->
+                    </div>
+                </div>
+
+                <div id="service-detail-section" style="display: none;">
+                    <div id="service-detail-container">
+                        <!-- Détail du service -->
+                    </div>
+                </div>
                 
                 <!-- Section Statistiques (cachée par défaut) -->
                 <div id="statistics-section" style="display: none;">
@@ -126,7 +145,7 @@
         <div id="new-reservation-modal" class="modal">
             <div class="modal-content" style="max-width: 500px;">
                 <span class="close-new-modal" style="float: right; font-size: 28px; cursor: pointer;">&times;</span>
-                <h2>➕ Nouvelle Réservation</h2>
+                <h2 id="new-reservation-title">➕ Nouvelle Réservation</h2>
                 <form id="new-reservation-form" style="margin-top: 20px;">
                     <div style="margin-bottom: 15px;">
                         <label style="display: block; margin-bottom: 5px;">Nom complet *</label>
@@ -206,7 +225,7 @@
                     
                     <div style="display: flex; gap: 10px; justify-content: flex-end;">
                         <button type="button" class="btn" id="cancel-new-btn" style="background: #6c757d; color: white; padding: 10px 20px; border-radius: 5px;">Annuler</button>
-                        <button type="submit" class="btn" style="background: #28a745; color: white; padding: 10px 20px; border-radius: 5px;">Créer la réservation</button>
+                        <button type="submit" class="btn" id="submit-reservation-btn" style="background: #28a745; color: white; padding: 10px 20px; border-radius: 5px;">Créer la réservation</button>
                     </div>
                 </form>
             </div>
@@ -243,6 +262,6 @@
         </div>
     </div>
 
-    <script src="renderer.js"></script>
+    <script type="module" src="renderer.js"></script>
 </body>
 </html>

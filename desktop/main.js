@@ -1,69 +1,128 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu } = require('electron');
 const path = require('path');
+const fs = require('fs');
+const util = require('util');
+
+// Empêcher les crashs EPIPE quand stdout/stderr sont fermés (Windows sans console).
+// console.log lance l'erreur de manière synchrone, donc on doit wrapper les fonctions
+// plutôt que d'écouter l'événement 'error' du stream.
+const _log = console.log;
+const _error = console.error;
+const _warn = console.warn;
+console.log = (...a) => { try { _log.apply(console, a); } catch (e) { if (e.code !== 'EPIPE') throw e; } };
+console.error = (...a) => { try { _error.apply(console, a); } catch (e) { if (e.code !== 'EPIPE') throw e; } };
+console.warn = (...a) => { try { _warn.apply(console, a); } catch (e) { if (e.code !== 'EPIPE') throw e; } };
+
 const io = require('socket.io-client');
+require('dotenv').config();
+
+const DEFAULT_BACKEND_URL = 'https://restaurant-booking-backend-y3sp.onrender.com';
+const BACKEND_URL = (process.env.BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/$/, '');
 
 let mainWindow;
 let tray;
 let socket;
 
-// Connexion au serveur backend
+function writeToStream(stream, args) {
+  if (!stream || typeof stream.write !== 'function' || stream.destroyed || stream.writable === false) {
+    return;
+  }
+
+  stream.write(`${util.format(...args)}\n`);
+}
+
+function safeLog(...args) {
+  try {
+    writeToStream(process.stdout, args);
+  } catch (error) {
+    if (error && error.code !== 'EPIPE') {
+      throw error;
+    }
+  }
+}
+
+function safeError(...args) {
+  try {
+    writeToStream(process.stderr, args);
+  } catch (error) {
+    if (error && error.code !== 'EPIPE') {
+      throw error;
+    }
+  }
+}
+
+async function apiRequest(endpoint, options = {}) {
+  const headers = {};
+  const requestOptions = {
+    method: options.method || 'GET',
+    headers
+  };
+
+  if (options.body) {
+    headers['Content-Type'] = 'application/json';
+    requestOptions.body = JSON.stringify(options.body);
+  }
+
+  const response = await fetch(`${BACKEND_URL}${endpoint}`, requestOptions);
+  const isJson = response.headers.get('content-type')?.includes('application/json');
+  const payload = isJson ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    const message = typeof payload === 'object' && payload !== null
+      ? payload.message
+      : payload;
+    throw new Error(message || `Request failed with status ${response.status}`);
+  }
+
+  return payload;
+}
+
+function sendToRenderer(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  mainWindow.webContents.send(channel, payload);
+}
+
 function connectToBackend() {
-  // Si déjà connecté, déconnecter et nettoyer les listeners
   if (socket) {
     socket.removeAllListeners();
     socket.disconnect();
     socket = null;
   }
-  
-  // Utiliser le backend déployé sur Render
-  socket = io('https://restaurant-booking-backend-y3sp.onrender.com');
-  
+
+  socket = io(BACKEND_URL);
+
   socket.on('connect', () => {
-    console.log('Connecté au serveur backend');
+    safeLog('Connecte au serveur backend');
+
     if (mainWindow && mainWindow.webContents) {
-      // Attendre que la page soit chargée avant d'envoyer l'événement
-      mainWindow.webContents.once('did-finish-load', () => {
-        mainWindow.webContents.send('backend-connected');
-        console.log('Événement backend-connected envoyé');
-      });
-      // Si déjà chargée, envoyer immédiatement
-      if (!mainWindow.webContents.isLoading()) {
-        mainWindow.webContents.send('backend-connected');
-        console.log('Événement backend-connected envoyé (page déjà chargée)');
+      if (mainWindow.webContents.isLoading()) {
+        mainWindow.webContents.once('did-finish-load', () => {
+          sendToRenderer('backend-connected');
+        });
+      } else {
+        sendToRenderer('backend-connected');
       }
     }
   });
-  
+
   socket.on('new-reservation', (reservation) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('new-reservation', reservation);
-      
-      // Notification système
-      const notification = {
-        title: 'Nouvelle Réservation',
-        body: `${reservation.customerName} - ${reservation.numberOfPeople} personnes`
-      };
-      mainWindow.webContents.send('show-notification', notification);
-    }
+    sendToRenderer('new-reservation', reservation);
   });
-  
+
   socket.on('update-reservation', (reservation) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('update-reservation', reservation);
-    }
+    sendToRenderer('update-reservation', reservation);
   });
-  
+
   socket.on('cancel-reservation', (reservation) => {
-    if (mainWindow) {
-      mainWindow.webContents.send('cancel-reservation', reservation);
-    }
+    sendToRenderer('cancel-reservation', reservation);
   });
-  
+
   socket.on('disconnect', () => {
-    console.log('Déconnecté du serveur backend');
-    if (mainWindow) {
-      mainWindow.webContents.send('backend-disconnected');
-    }
+    safeLog('Deconnecte du serveur backend');
+    sendToRenderer('backend-disconnected');
   });
 }
 
@@ -72,56 +131,56 @@ function createWindow() {
     width: 1200,
     height: 800,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: true,
+      nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js')
     },
     icon: path.join(__dirname, 'assets', 'icon.png')
   });
-  
+
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
-  
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-  
-  // Minimiser dans la barre système au lieu de fermer
+
   mainWindow.on('minimize', (event) => {
     event.preventDefault();
     mainWindow.hide();
   });
-  
+
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
       mainWindow.hide();
     }
+
     return false;
   });
 }
 
-// Créer l'icône de la barre système
 function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-  
-  // Vérifier si le fichier existe
-  const fs = require('fs');
+
   if (!fs.existsSync(iconPath)) {
-    console.error('Tray icon not found at:', iconPath);
+    safeError('Tray icon not found at:', iconPath);
     return;
   }
-  
+
   try {
     tray = new Tray(iconPath);
   } catch (error) {
-    console.error('Failed to create tray:', error);
+    safeError('Failed to create tray:', error);
     return;
   }
-  
+
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'Ouvrir',
       click: () => {
-        mainWindow.show();
+        if (mainWindow) {
+          mainWindow.show();
+        }
       }
     },
     {
@@ -132,12 +191,14 @@ function createTray() {
       }
     }
   ]);
-  
-  tray.setToolTip('Système de Réservation Restaurant');
+
+  tray.setToolTip('Systeme de Reservation Restaurant');
   tray.setContextMenu(contextMenu);
-  
+
   tray.on('double-click', () => {
-    mainWindow.show();
+    if (mainWindow) {
+      mainWindow.show();
+    }
   });
 }
 
@@ -159,16 +220,50 @@ app.on('activate', () => {
   }
 });
 
-// IPC pour la communication avec le renderer
-ipcMain.on('get-reservations', (event) => {
-  // Demander les réservations au backend
-  socket.emit('get-reservations');
+ipcMain.handle('get-config', async () => ({
+  backendUrl: BACKEND_URL
+}));
+
+ipcMain.handle('get-reservations', async (_event, filters = {}) => {
+  const searchParams = new URLSearchParams();
+
+  if (filters.date) {
+    searchParams.set('date', filters.date);
+  }
+
+  if (filters.status && filters.status !== 'all') {
+    searchParams.set('status', filters.status);
+  }
+
+  const query = searchParams.toString();
+  return apiRequest(`/api/reservations${query ? `?${query}` : ''}`);
 });
 
-ipcMain.on('update-reservation', (event, reservation) => {
-  socket.emit('update-reservation', reservation);
+ipcMain.handle('create-reservation', async (_event, data) => {
+  return apiRequest('/api/reservations/desktop', {
+    method: 'POST',
+    body: data
+  });
 });
 
-ipcMain.on('cancel-reservation', (event, reservationId) => {
-  socket.emit('cancel-reservation', reservationId);
+ipcMain.handle('update-reservation', async (_event, payload) => {
+  const { id, data } = payload;
+  return apiRequest(`/api/reservations/${id}`, {
+    method: 'PUT',
+    body: data
+  });
+});
+
+ipcMain.handle('confirm-reservation', async (_event, id) => {
+  return apiRequest(`/api/reservations/${id}`, {
+    method: 'PUT',
+    body: { status: 'confirmed' }
+  });
+});
+
+ipcMain.handle('cancel-reservation', async (_event, id) => {
+  return apiRequest(`/api/reservations/${id}`, {
+    method: 'PUT',
+    body: { status: 'cancelled' }
+  });
 });

@@ -1,9 +1,17 @@
-const { ipcRenderer } = require('electron');
+const api = window.api;
+const ipcRenderer = {
+    on(eventName, callback) {
+        return api.onReservationEvent(eventName, (payload) => callback(null, payload));
+    }
+};
 
 // État de l'application
 let reservations = [];
 let currentFilter = 'all';
 let currentView = 'today';
+let currentServiceFilter = 'all';
+let serviceDetailState = null;
+let editingReservationId = null;
 let notifiedReservations = new Set(); // Pour éviter les notifications en double
 
 // Éléments DOM
@@ -16,6 +24,104 @@ const searchInput = document.getElementById('search-input');
 const dateFilter = document.getElementById('date-filter');
 const serviceFilter = document.getElementById('service-filter');
 const reservationsTitle = document.getElementById('reservations-title');
+const weekSection = document.getElementById('week-section');
+const monthSection = document.getElementById('month-section');
+const statisticsSection = document.getElementById('statistics-section');
+const clientsSection = document.getElementById('clients-section');
+const serviceDetailSection = document.getElementById('service-detail-section');
+const weekContainer = document.getElementById('week-container');
+const monthContainer = document.getElementById('month-container');
+const serviceDetailContainer = document.getElementById('service-detail-container');
+const pendingSection = document.getElementById('pending-section');
+const pendingContainer = document.getElementById('pending-container');
+
+function formatDateInput(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function parseDateInput(value) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+}
+
+function getDayKey(value) {
+    const date = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? parseDateInput(value)
+        : new Date(value);
+    date.setHours(0, 0, 0, 0);
+    return date.toDateString();
+}
+
+function isActiveReservation(reservation) {
+    return reservation.status !== 'cancelled';
+}
+
+function getReservationService(reservation) {
+    const hour = parseInt(reservation.time.split(':')[0], 10);
+    return hour < 15 ? 'midi' : 'soir';
+}
+
+function getReservationsForDate(dateValue) {
+    const targetDay = getDayKey(dateValue);
+    return reservations.filter((reservation) => getDayKey(reservation.date) === targetDay);
+}
+
+function getServiceReservations(dateValue, service) {
+    return getReservationsForDate(dateValue).filter((reservation) => getReservationService(reservation) === service);
+}
+
+function getServiceSummary(serviceReservations) {
+    const activeReservations = serviceReservations.filter(isActiveReservation);
+    return {
+        totalReservations: activeReservations.length,
+        totalCovers: activeReservations.reduce((sum, reservation) => sum + reservation.numberOfPeople, 0),
+        cancelledCount: serviceReservations.length - activeReservations.length
+    };
+}
+
+function getLoadClass(totalCovers, limit = 50) {
+    if (totalCovers >= limit) {
+        return 'danger';
+    }
+
+    if (totalCovers >= limit * 0.8) {
+        return 'warning';
+    }
+
+    return '';
+}
+
+function getSelectedDateValue() {
+    return dateFilter && dateFilter.value ? dateFilter.value : formatDateInput(new Date());
+}
+
+function formatLongDate(dateValue) {
+    const date = typeof dateValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
+        ? parseDateInput(dateValue)
+        : new Date(dateValue);
+    return date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+function hideSections() {
+    reservationsContainer.style.display = 'none';
+    clientsSection.style.display = 'none';
+    weekSection.style.display = 'none';
+    monthSection.style.display = 'none';
+    statisticsSection.style.display = 'none';
+    serviceDetailSection.style.display = 'none';
+    pendingSection.style.display = 'none';
+}
+
+function switchView(view) {
+    currentView = view;
+    document.querySelectorAll('[data-view]').forEach((link) => {
+        link.classList.toggle('active', link.dataset.view === view);
+    });
+    displayReservations();
+}
 
 // Mise à jour de l'heure
 function updateDateTime() {
@@ -37,6 +143,12 @@ ipcRenderer.on('backend-connected', () => {
 ipcRenderer.on('backend-disconnected', () => {
     connectionStatus.textContent = 'Déconnecté';
     connectionStatus.className = 'status disconnected';
+});
+
+ipcRenderer.on('show-notification', (event, notification) => {
+    if (notification) {
+        showNotification(notification.title, notification.body);
+    }
 });
 
 // Réception des nouvelles réservations
@@ -85,13 +197,31 @@ ipcRenderer.on('cancel-reservation', (event, reservation) => {
 async function loadReservations() {
     console.log('Tentative de chargement des réservations...');
     try {
-        const response = await fetch('https://restaurant-booking-backend-y3sp.onrender.com/api/reservations');
-        console.log('Réponse reçue:', response.status);
-        const data = await response.json();
+        const data = await api.getReservations();
         console.log('Données reçues:', data);
         if (data.success) {
             reservations = data.data;
             console.log(`${reservations.length} réservations chargées`);
+
+            // Si aucune réservation aujourd'hui, pointer vers la prochaine date avec des réservations
+            const todayKey = getDayKey(new Date());
+            const todayHasReservations = reservations.some(r => getDayKey(r.date) === todayKey);
+            if (!todayHasReservations && reservations.length > 0) {
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const futureDates = reservations
+                    .filter(r => {
+                        const d = new Date(r.date);
+                        d.setHours(0, 0, 0, 0);
+                        return d >= today && r.status !== 'cancelled';
+                    })
+                    .map(r => new Date(r.date))
+                    .sort((a, b) => a - b);
+                if (futureDates.length > 0 && dateFilter) {
+                    dateFilter.value = formatDateInput(futureDates[0]);
+                }
+            }
+
             displayReservations();
             updateStats();
         }
@@ -102,21 +232,37 @@ async function loadReservations() {
 
 // Afficher les réservations
 function displayReservations() {
+    hideSections();
+
+    if (currentView === 'service-detail') {
+        displayServiceDetail();
+        return;
+    }
+
     // Gérer les vues spéciales
-    if (currentView === 'clients') {
+    if (currentView === 'pending') {
+        displayPending();
+        return;
+    } else if (currentView === 'clients') {
         displayClients();
         return;
     } else if (currentView === 'week') {
         displayWeekView();
         return;
+    } else if (currentView === 'month') {
+        displayMonthView();
+        return;
     } else if (currentView === 'statistics') {
         displayStatistics();
         return;
-    } else if (currentView === 'pending') {
-        displayPendingReservations();
+    } else if (currentView === 'today') {
+        displayTodayView();
         return;
     }
     
+    reservationsContainer.style.display = 'grid';
+    const filters = document.querySelector('.filters');
+    if (filters) filters.style.display = 'flex';
     let filteredReservations = reservations;
     
     console.log('Affichage des réservations, vue actuelle:', currentView);
@@ -125,15 +271,11 @@ function displayReservations() {
     // Filtrer par vue ou par date sélectionnée
     if (dateFilter && dateFilter.value) {
         // Si une date est sélectionnée, filtrer par cette date
-        const selectedDate = new Date(dateFilter.value).toDateString();
+        const selectedDate = getDayKey(dateFilter.value);
         filteredReservations = filteredReservations.filter(r => 
-            new Date(r.date).toDateString() === selectedDate
+            getDayKey(r.date) === selectedDate
         );
         console.log(`Réservations du ${selectedDate}:`, filteredReservations.length);
-    } else if (currentView === 'today') {
-        // Pour Aujourd'hui, on affiche la vue détaillée
-        displayTodayView();
-        return;
     } else if (currentView === 'upcoming') {
         const today = new Date();
         today.setHours(0, 0, 0, 0); // Réinitialiser à minuit pour comparer les dates correctement
@@ -370,33 +512,14 @@ function showReservationDetails(reservation) {
 async function updateReservationStatus(id, status) {
     console.log(`Mise à jour du statut: ${id} -> ${status}`);
     try {
-        const url = `https://restaurant-booking-backend-y3sp.onrender.com/api/reservations/${id}`;
-        console.log('URL de mise à jour:', url);
-        
-        const response = await fetch(url, {
-            method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            body: JSON.stringify({ status })
-        });
-        
-        console.log('Réponse de mise à jour:', response.status);
-        console.log('Réponse headers:', response.headers);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Erreur response:', errorText);
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const data = await response.json();
+        const data = status === 'confirmed'
+            ? await api.confirmReservation(id)
+            : await api.cancelReservation(id);
         console.log('Données de mise à jour:', data);
         
         if (data.success) {
             modal.style.display = 'none';
-            loadReservations();
+            await loadReservations();
             showNotification('Succès', `Réservation ${status === 'confirmed' ? 'confirmée' : 'annulée'}`);
         } else {
             alert(`Erreur: ${data.message}`);
@@ -411,16 +534,32 @@ async function updateReservationStatus(id, status) {
 
 // Éditer une réservation
 function editReservation(reservation) {
-    // Ici, on pourrait ouvrir un formulaire d'édition
     console.log('Édition de la réservation:', reservation);
+    const newReservationModal = document.getElementById('new-reservation-modal');
+    const newReservationTitle = document.getElementById('new-reservation-title');
+    const submitReservationBtn = document.getElementById('submit-reservation-btn');
+
+    editingReservationId = reservation._id;
+    newReservationTitle.textContent = 'Modifier la réservation';
+    submitReservationBtn.textContent = 'Enregistrer';
+
+    document.getElementById('new-name').value = reservation.customerName || '';
+    document.getElementById('new-date').value = formatDateInput(new Date(reservation.date));
+    document.getElementById('new-time').value = reservation.time || '';
+    document.getElementById('new-people').value = String(reservation.numberOfPeople || 2);
+    document.getElementById('new-phone').value = reservation.phoneNumber || '';
+    document.getElementById('new-email').value = reservation.email || '';
+    document.getElementById('new-requests').value = reservation.specialRequests || '';
+
     modal.style.display = 'none';
+    newReservationModal.style.display = 'block';
 }
 
 // Mise à jour des statistiques
 function updateStats() {
-    const today = new Date().toDateString();
+    const today = getDayKey(new Date());
     const todayReservations = reservations.filter(r => 
-        new Date(r.date).toDateString() === today
+        getDayKey(r.date) === today
     );
     
     // Filtrer les réservations actives (non annulées)
@@ -472,10 +611,10 @@ searchInput.addEventListener('input', displayReservations);
 // Filtre par date
 if (dateFilter) {
     // Définir la date d'aujourd'hui par défaut
-    dateFilter.value = new Date().toISOString().split('T')[0];
+    dateFilter.value = formatDateInput(new Date());
     
     dateFilter.addEventListener('change', (e) => {
-        const selectedDate = new Date(e.target.value);
+        const selectedDate = parseDateInput(e.target.value);
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         selectedDate.setHours(0, 0, 0, 0);
@@ -493,33 +632,26 @@ if (dateFilter) {
 
 // Filtre par service
 if (serviceFilter) {
-    serviceFilter.addEventListener('change', displayReservations);
-}
-
-// Navigation
-document.querySelectorAll('nav a').forEach(link => {
-    link.addEventListener('click', (e) => {
-        e.preventDefault();
-        document.querySelector('nav a.active').classList.remove('active');
-        link.classList.add('active');
-        currentView = link.dataset.view;
+    currentServiceFilter = serviceFilter.value;
+    serviceFilter.addEventListener('change', (event) => {
+        currentServiceFilter = event.target.value;
         displayReservations();
     });
-});
+}
 
 // Fonction pour extraire et analyser les clients
-function extractClients() {
+function extractClients(source = reservations) {
     const clientsMap = new Map();
-
-    reservations.forEach(reservation => {
-        const key = reservation.email || reservation.phoneNumber || reservation.phone;
+    
+    source.forEach(reservation => {
+        const key = reservation.email || reservation.phoneNumber;
         if (!key) return;
-
+        
         if (!clientsMap.has(key)) {
             clientsMap.set(key, {
                 name: reservation.customerName,
                 email: reservation.email || '',
-                phone: reservation.phoneNumber || reservation.phone || '',
+                phone: reservation.phoneNumber || '',
                 firstVisit: reservation.date,
                 lastVisit: reservation.date,
                 totalVisits: 0,
@@ -532,11 +664,6 @@ function extractClients() {
         client.totalVisits++;
         client.totalCovers += reservation.numberOfPeople;
         client.reservations.push(reservation);
-
-        // Mettre à jour le téléphone si manquant
-        if (!client.phone && (reservation.phoneNumber || reservation.phone)) {
-            client.phone = reservation.phoneNumber || reservation.phone;
-        }
         
         // Mettre à jour première et dernière visite
         if (new Date(reservation.date) < new Date(client.firstVisit)) {
@@ -555,9 +682,11 @@ function displayClients() {
     const clientsSection = document.getElementById('clients-section');
     const reservationsContainer = document.getElementById('reservations-container');
     const clientsContainer = document.getElementById('clients-container');
+    const filters = document.querySelector('.filters');
     
     // Masquer les réservations, afficher les clients
     reservationsContainer.style.display = 'none';
+    if (filters) filters.style.display = 'none';
     clientsSection.style.display = 'block';
     
     const clients = extractClients();
@@ -640,83 +769,47 @@ function searchClients(e) {
 
 // Vue Semaine - Planning hebdomadaire
 function displayWeekView() {
-    const weekSection = document.getElementById('week-section');
-    const weekContainer = document.getElementById('week-container');
     const reservationsContainer = document.getElementById('reservations-container');
-    
+    const filters = document.querySelector('.filters');
+
     reservationsContainer.style.display = 'none';
+    if (filters) filters.style.display = 'none';
     weekSection.style.display = 'block';
-    
-    // Obtenir les dates de la semaine
-    const today = new Date();
-    const currentDay = today.getDay();
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - currentDay + 1); // Lundi
-    
+
+    const anchorDate = parseDateInput(getSelectedDateValue());
+    const weekStart = new Date(anchorDate);
+    const dayOfWeek = weekStart.getDay() || 7;
+    weekStart.setDate(weekStart.getDate() - dayOfWeek + 1);
+
     const weekDays = [];
-    for (let i = 0; i < 7; i++) {
+    for (let index = 0; index < 7; index += 1) {
         const date = new Date(weekStart);
-        date.setDate(weekStart.getDate() + i);
+        date.setDate(weekStart.getDate() + index);
         weekDays.push(date);
     }
-    
-    // Grouper les réservations par jour
-    const reservationsByDay = {};
-    weekDays.forEach(day => {
-        const dayStr = day.toDateString();
-        reservationsByDay[dayStr] = {
-            date: day,
-            midi: [],
-            soir: []
-        };
-    });
-    
-    reservations.forEach(res => {
-        const resDate = new Date(res.date);
-        const dayStr = resDate.toDateString();
-        if (reservationsByDay[dayStr]) {
-            const hour = parseInt(res.time.split(':')[0]);
-            if (hour < 15) {
-                reservationsByDay[dayStr].midi.push(res);
-            } else {
-                reservationsByDay[dayStr].soir.push(res);
-            }
-        }
-    });
-    
-    // Afficher le planning
+
     weekContainer.innerHTML = `
         <h2 style="margin-bottom: 20px;">📆 Planning de la Semaine</h2>
         <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;">
             ${weekDays.map(day => {
-                const dayStr = day.toDateString();
-                const dayData = reservationsByDay[dayStr];
-                const dayName = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'][day.getDay()];
-                const isToday = dayStr === today.toDateString();
-                const dateISO = day.toISOString().split('T')[0];
-
-                const midiCount = dayData.midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
-                const soirCount = dayData.soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
+                const dateValue = formatDateInput(day);
+                const midiSummary = getServiceSummary(getServiceReservations(dateValue, 'midi'));
+                const soirSummary = getServiceSummary(getServiceReservations(dateValue, 'soir'));
+                const isToday = getDayKey(day) === getDayKey(new Date());
 
                 return `
                     <div style="background: ${isToday ? '#e3f2fd' : 'white'}; border-radius: 10px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-                        <h3 style="text-align: center; color: #147c7f; margin-bottom: 10px;">
-                            ${dayName}<br>
+                        <h3 class="service-clickable" data-open-day="${dateValue}" style="text-align: center; color: #147c7f; margin-bottom: 10px;">
+                            ${day.toLocaleDateString('fr-FR', { weekday: 'short' })}<br>
                             <small>${day.getDate()}/${day.getMonth() + 1}</small>
                         </h3>
-                        <div class="week-service-card" data-date="${dateISO}" data-service="midi" style="margin-bottom: 10px; padding: 10px; background: #fff3cd; border-radius: 5px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;">
+                        <div class="service-clickable" data-date="${dateValue}" data-service="midi" style="margin-bottom: 10px; padding: 10px; background: #fff3cd; border-radius: 5px;">
                             <strong>☀️ Midi</strong><br>
-                            ${dayData.midi.length} rés. / ${midiCount} couv.<br>
-                            <div style="width: 100%; background: #e9ecef; height: 10px; border-radius: 5px; margin-top: 5px;">
-                                <div style="width: ${(midiCount/50)*100}%; background: ${midiCount >= 50 ? '#dc3545' : midiCount >= 40 ? '#ffc107' : '#28a745'}; height: 10px; border-radius: 5px;"></div>
-                            </div>
+                            ${midiSummary.totalReservations} rés. / ${midiSummary.totalCovers} couv.
                         </div>
-                        <div class="week-service-card" data-date="${dateISO}" data-service="soir" style="padding: 10px; background: #d1ecf1; border-radius: 5px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;">
+                        <div class="service-clickable" data-date="${dateValue}" data-service="soir" style="padding: 10px; background: #d1ecf1; border-radius: 5px;">
                             <strong>🌙 Soir</strong><br>
-                            ${dayData.soir.length} rés. / ${soirCount} couv.<br>
-                            <div style="width: 100%; background: #e9ecef; height: 10px; border-radius: 5px; margin-top: 5px;">
-                                <div style="width: ${(soirCount/50)*100}%; background: ${soirCount >= 50 ? '#dc3545' : soirCount >= 40 ? '#ffc107' : '#28a745'}; height: 10px; border-radius: 5px;"></div>
-                            </div>
+                            ${soirSummary.totalReservations} rés. / ${soirSummary.totalCovers} couv.
                         </div>
                     </div>
                 `;
@@ -724,24 +817,157 @@ function displayWeekView() {
         </div>
     `;
 
-    // Ajouter les événements de clic sur les cartes
-    document.querySelectorAll('.week-service-card').forEach(card => {
-        card.addEventListener('mouseenter', () => {
-            card.style.transform = 'scale(1.05)';
-            card.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2)';
+    weekContainer.querySelectorAll('[data-open-day]').forEach((element) => {
+        element.addEventListener('click', () => {
+            dateFilter.value = element.dataset.openDay;
+            switchView('today');
         });
-        card.addEventListener('mouseleave', () => {
-            card.style.transform = 'scale(1)';
-            card.style.boxShadow = 'none';
-        });
-        card.addEventListener('click', () => {
-            const date = card.dataset.date;
-            const service = card.dataset.service;
-            showDayServiceReservations(date, service);
+    });
+
+    weekContainer.querySelectorAll('[data-service]').forEach((element) => {
+        element.addEventListener('click', () => {
+            openServiceDetail(element.dataset.date, element.dataset.service, 'week');
         });
     });
 
     document.getElementById('reservations-title').textContent = '📆 Planning de la Semaine';
+}
+
+function displayMonthView() {
+    const reservationsContainer = document.getElementById('reservations-container');
+    const filters = document.querySelector('.filters');
+    const anchorDate = parseDateInput(getSelectedDateValue());
+    const firstDay = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+    const firstGridDay = new Date(firstDay);
+    const firstGridWeekDay = firstGridDay.getDay() || 7;
+    firstGridDay.setDate(firstGridDay.getDate() - firstGridWeekDay + 1);
+
+    reservationsContainer.style.display = 'none';
+    if (filters) filters.style.display = 'none';
+    monthSection.style.display = 'block';
+
+    const weekLabels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+    const monthDays = [];
+
+    for (let index = 0; index < 42; index += 1) {
+        const date = new Date(firstGridDay);
+        date.setDate(firstGridDay.getDate() + index);
+        monthDays.push(date);
+    }
+
+    monthContainer.innerHTML = `
+        <div class="month-toolbar">
+            <button type="button" class="btn btn-primary" data-month-nav="-1">Mois précédent</button>
+            <h2>${firstDay.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</h2>
+            <button type="button" class="btn btn-primary" data-month-nav="1">Mois suivant</button>
+        </div>
+        <div class="month-grid">
+            ${weekLabels.map(label => `<div class="month-weekday">${label}</div>`).join('')}
+            ${monthDays.map(day => {
+                const dateValue = formatDateInput(day);
+                const midiSummary = getServiceSummary(getServiceReservations(dateValue, 'midi'));
+                const soirSummary = getServiceSummary(getServiceReservations(dateValue, 'soir'));
+                const isToday = getDayKey(day) === getDayKey(new Date());
+                const isOutsideMonth = day.getMonth() !== firstDay.getMonth();
+
+                return `
+                    <div class="month-day-card ${isToday ? 'today' : ''} ${isOutsideMonth ? 'outside-month' : ''}" data-open-day="${dateValue}">
+                        <div class="month-day-number">
+                            <span>${day.getDate()}</span>
+                            <small>${day.toLocaleDateString('fr-FR', { weekday: 'short' })}</small>
+                        </div>
+                        <div class="month-service-block midi" data-date="${dateValue}" data-service="midi">
+                            <span class="month-service-name">☀️ Midi</span>
+                            <span class="month-service-value">${midiSummary.totalReservations} rés / ${midiSummary.totalCovers} couv</span>
+                        </div>
+                        <div class="month-service-block soir" data-date="${dateValue}" data-service="soir">
+                            <span class="month-service-name">🌙 Soir</span>
+                            <span class="month-service-value">${soirSummary.totalReservations} rés / ${soirSummary.totalCovers} couv</span>
+                        </div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+
+    monthContainer.querySelectorAll('[data-month-nav]').forEach((button) => {
+        button.addEventListener('click', () => {
+            const nextDate = parseDateInput(getSelectedDateValue());
+            nextDate.setDate(1);
+            nextDate.setMonth(nextDate.getMonth() + Number(button.dataset.monthNav));
+            dateFilter.value = formatDateInput(nextDate);
+            displayMonthView();
+        });
+    });
+
+    monthContainer.querySelectorAll('[data-open-day]').forEach((element) => {
+        element.addEventListener('click', () => {
+            dateFilter.value = element.dataset.openDay;
+            switchView('today');
+        });
+    });
+
+    monthContainer.querySelectorAll('.month-service-block').forEach((element) => {
+        element.addEventListener('click', (event) => {
+            event.stopPropagation();
+            openServiceDetail(element.dataset.date, element.dataset.service, 'month');
+        });
+    });
+
+    document.getElementById('reservations-title').textContent = '🗓️ Planning du Mois';
+}
+
+function openServiceDetail(dateValue, service, returnView = 'week') {
+    serviceDetailState = {
+        dateValue,
+        service,
+        returnView
+    };
+    dateFilter.value = dateValue;
+    currentView = 'service-detail';
+    displayReservations();
+}
+
+function displayServiceDetail() {
+    if (!serviceDetailState) {
+        switchView('today');
+        return;
+    }
+
+    const filters = document.querySelector('.filters');
+    const serviceReservations = getServiceReservations(serviceDetailState.dateValue, serviceDetailState.service);
+    const summary = getServiceSummary(serviceReservations);
+    const serviceLabel = serviceDetailState.service === 'midi' ? 'Midi' : 'Soir';
+
+    if (filters) filters.style.display = 'none';
+    serviceDetailSection.style.display = 'block';
+
+    serviceDetailContainer.innerHTML = `
+        <div class="service-detail-header">
+            <h2>${serviceDetailState.service === 'midi' ? '☀️' : '🌙'} ${serviceLabel} - ${formatLongDate(serviceDetailState.dateValue)}</h2>
+            <button type="button" class="btn back-button" id="back-to-planning">← Retour au planning</button>
+        </div>
+        <div class="service-detail-banner">
+            <h3>${serviceDetailState.service === 'midi' ? '☀️' : '🌙'} ${serviceLabel} - ${formatLongDate(serviceDetailState.dateValue)}</h3>
+            <p>${summary.totalCovers} couverts / ${summary.totalReservations} réservations</p>
+            ${summary.cancelledCount > 0 ? `<small>${summary.cancelledCount} réservation(s) annulée(s) visible(s), non comptée(s).</small>` : ''}
+        </div>
+        <div class="reservations-subgrid" id="service-detail-cards"></div>
+    `;
+
+    const cardsContainer = document.getElementById('service-detail-cards');
+
+    if (serviceReservations.length === 0) {
+        cardsContainer.innerHTML = '<div class="empty-state">Aucune réservation sur ce service.</div>';
+    } else {
+        serviceReservations
+            .sort((a, b) => a.time.localeCompare(b.time))
+            .forEach((reservation) => cardsContainer.appendChild(createReservationCard(reservation)));
+    }
+
+    document.getElementById('back-to-planning').addEventListener('click', () => {
+        switchView(serviceDetailState.returnView || 'week');
+    });
 }
 
 // Vue Statistiques
@@ -749,16 +975,22 @@ function displayStatistics() {
     const statsSection = document.getElementById('statistics-section');
     const statsContainer = document.getElementById('statistics-container');
     const reservationsContainer = document.getElementById('reservations-container');
+    const filters = document.querySelector('.filters');
     
     reservationsContainer.style.display = 'none';
+    if (filters) filters.style.display = 'none';
     statsSection.style.display = 'block';
     
     // Calculer les statistiques
+    const activeReservations = reservations.filter(isActiveReservation);
+    const totalCovers = activeReservations.reduce((sum, reservation) => sum + reservation.numberOfPeople, 0);
     const stats = {
-        totalReservations: reservations.length,
-        totalCovers: reservations.reduce((sum, r) => sum + r.numberOfPeople, 0),
-        avgCovers: (reservations.reduce((sum, r) => sum + r.numberOfPeople, 0) / reservations.length).toFixed(1),
-        confirmedRate: ((reservations.filter(r => r.status === 'confirmed').length / reservations.length) * 100).toFixed(1)
+        totalReservations: activeReservations.length,
+        totalCovers,
+        avgCovers: activeReservations.length ? (totalCovers / activeReservations.length).toFixed(1) : '0.0',
+        confirmedRate: activeReservations.length
+            ? ((activeReservations.filter(r => r.status === 'confirmed').length / activeReservations.length) * 100).toFixed(1)
+            : '0.0'
     };
     
     // Statistiques par jour de la semaine
@@ -767,7 +999,7 @@ function displayStatistics() {
         dayStats[day] = { midi: 0, soir: 0 };
     });
     
-    reservations.forEach(res => {
+    activeReservations.forEach(res => {
         const date = new Date(res.date);
         const dayNames = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
         const dayName = dayNames[date.getDay()];
@@ -781,7 +1013,7 @@ function displayStatistics() {
     });
     
     // Top clients
-    const clients = extractClients();
+    const clients = extractClients(activeReservations);
     const topClients = clients.slice(0, 5);
     
     statsContainer.innerHTML = `
@@ -845,269 +1077,136 @@ function displayStatistics() {
     document.getElementById('reservations-title').textContent = '📊 Statistiques';
 }
 
-// Afficher les réservations d'un jour et service spécifique (depuis le planning semaine)
-function showDayServiceReservations(dateISO, service) {
-    const weekSection = document.getElementById('week-section');
-    const reservationsContainer = document.getElementById('reservations-container');
+function renderOperationalDayView() {
+    const filters = document.querySelector('.filters');
+    const selectedDate = getSelectedDateValue();
+    const dayReservations = getReservationsForDate(selectedDate);
+    const midiReservations = dayReservations.filter(r => getReservationService(r) === 'midi');
+    const soirReservations = dayReservations.filter(r => getReservationService(r) === 'soir');
+    const midiSummary = getServiceSummary(midiReservations);
+    const soirSummary = getServiceSummary(soirReservations);
+    const showMidi = currentServiceFilter === 'all' || currentServiceFilter === 'midi';
+    const showSoir = currentServiceFilter === 'all' || currentServiceFilter === 'soir';
 
-    // Masquer la vue semaine, afficher les réservations
-    weekSection.style.display = 'none';
     reservationsContainer.style.display = 'block';
+    if (filters) filters.style.display = 'flex';
+    reservationsTitle.textContent = getDayKey(selectedDate) === getDayKey(new Date())
+        ? "Réservations d'aujourd'hui"
+        : `Réservations du ${formatLongDate(selectedDate)}`;
 
-    const selectedDate = new Date(dateISO);
-    const dayReservations = reservations.filter(r => {
-        const resDate = new Date(r.date);
-        return resDate.toDateString() === selectedDate.toDateString();
-    });
-
-    // Filtrer par service
-    const filteredReservations = dayReservations.filter(r => {
-        const hour = parseInt(r.time.split(':')[0]);
-        if (service === 'midi') {
-            return hour < 15;
-        } else {
-            return hour >= 15;
-        }
-    });
-
-    // Trier par heure
-    filteredReservations.sort((a, b) => {
-        const timeA = a.time.split(':').map(Number);
-        const timeB = b.time.split(':').map(Number);
-        return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
-    });
-
-    const serviceName = service === 'midi' ? '☀️ Midi' : '🌙 Soir';
-    const dateFormatted = selectedDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-    const totalCovers = filteredReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
-
-    // Mettre à jour le titre
-    document.getElementById('reservations-title').textContent = `${serviceName} - ${dateFormatted}`;
-
-    // Afficher les réservations
     reservationsContainer.innerHTML = `
-        <div style="margin-bottom: 20px;">
-            <button id="back-to-week-btn" style="background: #147c7f; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-bottom: 15px;">
-                ← Retour au planning
-            </button>
-            <div style="background: ${service === 'midi' ? '#fff3cd' : '#d1ecf1'}; padding: 15px; border-radius: 10px;">
-                <h3>${serviceName} - ${dateFormatted}</h3>
-                <p style="font-size: 20px; font-weight: bold;">${totalCovers} couverts / ${filteredReservations.length} réservations</p>
-            </div>
-        </div>
-        ${filteredReservations.length === 0 ? `
-            <div style="text-align: center; padding: 40px; color: #666;">
-                <p style="font-size: 18px;">Aucune réservation pour ce service</p>
-            </div>
-        ` : `
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
-                ${filteredReservations.map(reservation => `
-                    <div class="reservation-card clickable-card" data-id="${reservation._id}" style="cursor: pointer;">
-                        <div class="reservation-header">
-                            <div class="reservation-time">${reservation.time}</div>
-                            <span class="reservation-status status-${reservation.status}">${getStatusText(reservation.status)}</span>
-                        </div>
-                        <div class="reservation-info">
-                            <div class="info-row">
-                                <span class="info-label">Nom:</span>
-                                <strong>${reservation.customerName}</strong>
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Téléphone:</span>
-                                ${reservation.phoneNumber}
-                            </div>
-                            <div class="info-row">
-                                <span class="info-label">Personnes:</span>
-                                ${reservation.numberOfPeople}
-                            </div>
-                            ${reservation.specialRequests ? `
-                            <div class="info-row">
-                                <span class="info-label">Notes:</span>
-                                ${reservation.specialRequests}
-                            </div>
-                            ` : ''}
-                        </div>
+        <div class="service-summary-grid">
+            ${showMidi ? `
+                <div class="service-summary-card midi service-clickable" data-date="${selectedDate}" data-service="midi">
+                    <h3>☀️ Service du Midi (12h00 - 13h15)</h3>
+                    <p style="font-size: 24px; font-weight: bold;">${midiSummary.totalCovers}/50 couverts</p>
+                    <p>${midiSummary.totalReservations} réservations</p>
+                    ${midiSummary.cancelledCount > 0 ? `<p>${midiSummary.cancelledCount} annulée(s) non comptée(s)</p>` : ''}
+                    <div class="progress-track">
+                        <div class="progress-fill ${getLoadClass(midiSummary.totalCovers)}" style="width: ${Math.min((midiSummary.totalCovers / 50) * 100, 100)}%;"></div>
                     </div>
-                `).join('')}
-            </div>
-        `}
+                </div>
+            ` : ''}
+            ${showSoir ? `
+                <div class="service-summary-card soir service-clickable" data-date="${selectedDate}" data-service="soir">
+                    <h3>🌙 Service du Soir (18h30 - 21h00)</h3>
+                    <p style="font-size: 24px; font-weight: bold;">${soirSummary.totalCovers}/50 couverts</p>
+                    <p>${soirSummary.totalReservations} réservations</p>
+                    ${soirSummary.cancelledCount > 0 ? `<p>${soirSummary.cancelledCount} annulée(s) non comptée(s)</p>` : ''}
+                    <div class="progress-track">
+                        <div class="progress-fill ${getLoadClass(soirSummary.totalCovers)}" style="width: ${Math.min((soirSummary.totalCovers / 50) * 100, 100)}%;"></div>
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+        ${showMidi ? `<h3 style="margin-bottom: 10px;">☀️ Midi - ${midiSummary.totalReservations} réservations</h3><div class="reservations-subgrid" id="today-midi-grid"></div>` : ''}
+        ${showSoir ? `<h3 style="margin-bottom: 10px;">🌙 Soir - ${soirSummary.totalReservations} réservations</h3><div class="reservations-subgrid" id="today-soir-grid"></div>` : ''}
     `;
 
-    // Bouton retour
-    document.getElementById('back-to-week-btn').addEventListener('click', () => {
-        currentView = 'week';
-        displayWeekView();
-    });
+    if (showMidi) {
+        const midiGrid = document.getElementById('today-midi-grid');
+        midiReservations.sort((a, b) => a.time.localeCompare(b.time)).forEach((reservation) => {
+            midiGrid.appendChild(createReservationCard(reservation));
+        });
+    }
 
-    // Clic sur les cartes de réservation
-    document.querySelectorAll('.clickable-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const resId = card.dataset.id;
-            const reservation = reservations.find(r => r._id === resId);
-            if (reservation) {
-                showReservationDetails(reservation);
-            }
+    if (showSoir) {
+        const soirGrid = document.getElementById('today-soir-grid');
+        soirReservations.sort((a, b) => a.time.localeCompare(b.time)).forEach((reservation) => {
+            soirGrid.appendChild(createReservationCard(reservation));
+        });
+    }
+
+    reservationsContainer.querySelectorAll('[data-service]').forEach((element) => {
+        element.addEventListener('click', () => {
+            openServiceDetail(element.dataset.date, element.dataset.service, 'today');
         });
     });
 }
 
-// Vue À confirmer - Toutes les réservations en attente
-function displayPendingReservations() {
-    const pendingSection = document.getElementById('pending-section');
-    const pendingContainer = document.getElementById('pending-container');
-    const reservationsContainer = document.getElementById('reservations-container');
-
-    reservationsContainer.style.display = 'none';
+// Vue "À confirmer" — toutes les réservations pending, toutes dates, triées par date
+function displayPending() {
+    const filters = document.querySelector('.filters');
+    if (filters) filters.style.display = 'none';
     pendingSection.style.display = 'block';
+    reservationsTitle.textContent = '⏳ Réservations à confirmer';
 
-    // Filtrer les réservations en attente (futures uniquement)
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const pendingReservations = reservations.filter(r => {
-        const resDate = new Date(r.date);
-        resDate.setHours(0, 0, 0, 0);
-        return r.status === 'pending' && resDate >= today;
-    });
-
-    // Trier par date puis par heure
-    pendingReservations.sort((a, b) => {
-        const dateA = new Date(a.date);
-        const dateB = new Date(b.date);
-        if (dateA.getTime() !== dateB.getTime()) {
-            return dateA - dateB;
-        }
-        const timeA = a.time.split(':').map(Number);
-        const timeB = b.time.split(':').map(Number);
-        return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
-    });
-
-    const totalCovers = pendingReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
-
-    pendingContainer.innerHTML = `
-        <div style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-            <div style="background: #fff3cd; padding: 15px 25px; border-radius: 10px; border-left: 5px solid #ffc107;">
-                <h3 style="margin: 0; color: #856404;">⏳ Réservations en attente</h3>
-                <p style="margin: 5px 0 0 0; font-size: 18px;"><strong>${pendingReservations.length}</strong> réservations / <strong>${totalCovers}</strong> couverts</p>
-            </div>
-            ${pendingReservations.length > 0 ? `
-                <button id="confirm-all-btn" style="background: #28a745; color: white; border: none; padding: 15px 30px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; transition: background 0.2s;">
-                    ✅ Tout confirmer (${pendingReservations.length})
-                </button>
-            ` : ''}
-        </div>
-
-        ${pendingReservations.length === 0 ? `
-            <div style="text-align: center; padding: 60px; color: #666; background: #f8f9fa; border-radius: 10px;">
-                <p style="font-size: 48px; margin: 0;">🎉</p>
-                <p style="font-size: 20px; margin: 15px 0 0 0;">Aucune réservation en attente !</p>
-                <p style="font-size: 14px; color: #999;">Toutes les réservations ont été traitées.</p>
-            </div>
-        ` : `
-            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 15px;">
-                ${pendingReservations.map(reservation => {
-                    const resDate = new Date(reservation.date);
-                    const dateStr = resDate.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-                    const hour = parseInt(reservation.time.split(':')[0]);
-                    const service = hour < 15 ? '☀️ Midi' : '🌙 Soir';
-
-                    return `
-                        <div class="pending-card" data-id="${reservation._id}" style="background: white; border-radius: 10px; padding: 15px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); border-left: 4px solid #ffc107; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                                <span style="font-weight: bold; font-size: 16px;">${reservation.customerName}</span>
-                                <span style="background: #fff3cd; color: #856404; padding: 3px 10px; border-radius: 15px; font-size: 12px;">En attente</span>
-                            </div>
-                            <div style="color: #666; font-size: 14px;">
-                                <p style="margin: 5px 0;">📅 ${dateStr} - ${reservation.time} ${service}</p>
-                                <p style="margin: 5px 0;">👥 ${reservation.numberOfPeople} personne${reservation.numberOfPeople > 1 ? 's' : ''}</p>
-                                <p style="margin: 5px 0;">📱 ${reservation.phoneNumber}</p>
-                                ${reservation.specialRequests ? `<p style="margin: 5px 0; font-style: italic;">💬 ${reservation.specialRequests}</p>` : ''}
-                            </div>
-                            <div style="display: flex; gap: 10px; margin-top: 15px;">
-                                <button class="confirm-single-btn" data-id="${reservation._id}" style="flex: 1; background: #28a745; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer;">✅ Confirmer</button>
-                                <button class="cancel-single-btn" data-id="${reservation._id}" style="flex: 1; background: #dc3545; color: white; border: none; padding: 8px; border-radius: 5px; cursor: pointer;">❌ Annuler</button>
-                            </div>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-        `}
-    `;
-
-    // Bouton tout confirmer
-    const confirmAllBtn = document.getElementById('confirm-all-btn');
-    if (confirmAllBtn) {
-        confirmAllBtn.addEventListener('mouseenter', () => {
-            confirmAllBtn.style.background = '#218838';
+    const pendingReservations = reservations
+        .filter(r => r.status === 'pending' && new Date(r.date) >= today)
+        .sort((a, b) => {
+            const dateDiff = new Date(a.date) - new Date(b.date);
+            return dateDiff !== 0 ? dateDiff : a.time.localeCompare(b.time);
         });
-        confirmAllBtn.addEventListener('mouseleave', () => {
-            confirmAllBtn.style.background = '#28a745';
-        });
-        confirmAllBtn.addEventListener('click', async () => {
-            if (confirm(`Confirmer les ${pendingReservations.length} réservations en attente ?`)) {
-                confirmAllBtn.disabled = true;
-                confirmAllBtn.textContent = '⏳ Confirmation en cours...';
 
-                let successCount = 0;
-                for (const reservation of pendingReservations) {
-                    try {
-                        const response = await fetch(`https://restaurant-booking-backend-y3sp.onrender.com/api/reservations/${reservation._id}`, {
-                            method: 'PUT',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ status: 'confirmed' })
-                        });
-                        if (response.ok) successCount++;
-                    } catch (error) {
-                        console.error('Erreur confirmation:', error);
-                    }
-                }
-
-                showNotification('Succès', `${successCount} réservation(s) confirmée(s)`);
-                loadReservations();
-            }
-        });
+    if (pendingReservations.length === 0) {
+        pendingContainer.innerHTML = '';
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'Aucune réservation en attente de confirmation.';
+        pendingContainer.appendChild(empty);
+        return;
     }
 
-    // Boutons individuels confirmer/annuler
-    document.querySelectorAll('.confirm-single-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            updateReservationStatus(btn.dataset.id, 'confirmed');
-        });
+    pendingContainer.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'service-detail-banner';
+    const totalCovers = pendingReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
+    const headerTitle = document.createElement('h3');
+    headerTitle.textContent = `${pendingReservations.length} réservation(s) en attente — ${totalCovers} couverts`;
+    header.appendChild(headerTitle);
+    pendingContainer.appendChild(header);
+
+    // Grouper par date
+    const byDate = new Map();
+    pendingReservations.forEach(r => {
+        const key = getDayKey(r.date);
+        if (!byDate.has(key)) byDate.set(key, []);
+        byDate.get(key).push(r);
     });
 
-    document.querySelectorAll('.cancel-single-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (confirm('Annuler cette réservation ?')) {
-                updateReservationStatus(btn.dataset.id, 'cancelled');
-            }
-        });
-    });
+    byDate.forEach((dateReservations, dateKey) => {
+        const dateLabel = document.createElement('h3');
+        dateLabel.style.cssText = 'margin: 20px 0 10px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;';
+        dateLabel.textContent = formatLongDate(dateReservations[0].date) +
+            ` — ${dateReservations.length} rés. / ${dateReservations.reduce((s, r) => s + r.numberOfPeople, 0)} couv.`;
+        pendingContainer.appendChild(dateLabel);
 
-    // Clic sur les cartes pour voir les détails
-    document.querySelectorAll('.pending-card').forEach(card => {
-        card.addEventListener('mouseenter', () => {
-            card.style.transform = 'translateY(-2px)';
-            card.style.boxShadow = '0 4px 15px rgba(0,0,0,0.15)';
-        });
-        card.addEventListener('mouseleave', () => {
-            card.style.transform = 'translateY(0)';
-            card.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
-        });
-        card.addEventListener('click', () => {
-            const reservation = reservations.find(r => r._id === card.dataset.id);
-            if (reservation) {
-                showReservationDetails(reservation);
-            }
-        });
+        const grid = document.createElement('div');
+        grid.className = 'reservations-subgrid';
+        dateReservations.forEach(r => grid.appendChild(createReservationCard(r)));
+        pendingContainer.appendChild(grid);
     });
-
-    document.getElementById('reservations-title').textContent = '⏳ À confirmer';
 }
 
 // Vue Aujourd'hui améliorée
 function displayTodayView() {
+    renderOperationalDayView();
+    return;
+
     const reservationsContainer = document.getElementById('reservations-container');
     const today = new Date().toDateString();
     const todayReservations = reservations.filter(r => 
@@ -1157,7 +1256,7 @@ function displayTodayView() {
                     <div class="reservation-name">${reservation.customerName}</div>
                     <div class="reservation-details">
                         <span>👥 ${reservation.numberOfPeople} personnes</span>
-                        ${reservation.phone ? `<span>📱 ${reservation.phone}</span>` : ''}
+                        ${reservation.phoneNumber ? `<span>📱 ${reservation.phoneNumber}</span>` : ''}
                     </div>
                     ${reservation.specialRequests ? `<div class="reservation-note">📝 ${reservation.specialRequests}</div>` : ''}
                     <div class="reservation-status status-${reservation.status}">
@@ -1177,7 +1276,7 @@ function displayTodayView() {
                     <div class="reservation-name">${reservation.customerName}</div>
                     <div class="reservation-details">
                         <span>👥 ${reservation.numberOfPeople} personnes</span>
-                        ${reservation.phone ? `<span>📱 ${reservation.phone}</span>` : ''}
+                        ${reservation.phoneNumber ? `<span>📱 ${reservation.phoneNumber}</span>` : ''}
                     </div>
                     ${reservation.specialRequests ? `<div class="reservation-note">📝 ${reservation.specialRequests}</div>` : ''}
                     <div class="reservation-status status-${reservation.status}">
@@ -1202,58 +1301,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('[data-view]').forEach(link => {
         link.addEventListener('click', (e) => {
             e.preventDefault();
-            const view = link.dataset.view;
-            
-            // Mettre à jour la vue actuelle
-            currentView = view;
-            
-            // Mettre à jour les classes actives
-            document.querySelectorAll('[data-view]').forEach(l => l.classList.remove('active'));
-            link.classList.add('active');
-            
-            // Masquer/afficher les sections appropriées
-            const clientsSection = document.getElementById('clients-section');
-            const weekSection = document.getElementById('week-section');
-            const statsSection = document.getElementById('statistics-section');
-            const pendingSection = document.getElementById('pending-section');
-            const reservationsContainer = document.getElementById('reservations-container');
-            const filters = document.querySelector('.filters');
-
-            clientsSection.style.display = 'none';
-            weekSection.style.display = 'none';
-            statsSection.style.display = 'none';
-            pendingSection.style.display = 'none';
-
-            if (view === 'clients') {
-                reservationsContainer.style.display = 'none';
-                clientsSection.style.display = 'block';
-                if (filters) filters.style.display = 'none';
-                displayClients();
-            } else if (view === 'week') {
-                reservationsContainer.style.display = 'none';
-                weekSection.style.display = 'block';
-                if (filters) filters.style.display = 'none';
-                displayWeekView();
-            } else if (view === 'statistics') {
-                reservationsContainer.style.display = 'none';
-                statsSection.style.display = 'block';
-                if (filters) filters.style.display = 'none';
-                displayStatistics();
-            } else if (view === 'pending') {
-                reservationsContainer.style.display = 'none';
-                pendingSection.style.display = 'block';
-                if (filters) filters.style.display = 'none';
-                displayPendingReservations();
-            } else if (view === 'today') {
-                reservationsContainer.style.display = 'block';
-                if (filters) filters.style.display = 'flex';
-                document.getElementById('reservations-title').textContent = "📅 Aujourd'hui";
-                displayTodayView();
-            } else {
-                reservationsContainer.style.display = 'grid';
-                if (filters) filters.style.display = 'flex';
-                displayReservations();
-            }
+            switchView(link.dataset.view);
         });
     });
     
@@ -1278,15 +1326,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Ouvrir le modal
     if (addReservationBtn) {
         addReservationBtn.addEventListener('click', () => {
+            editingReservationId = null;
+            document.getElementById('new-reservation-title').textContent = '➕ Nouvelle Réservation';
+            document.getElementById('submit-reservation-btn').textContent = 'Créer la réservation';
             newReservationModal.style.display = 'block';
             // Définir la date par défaut à aujourd'hui
-            document.getElementById('new-date').valueAsDate = new Date();
+            document.getElementById('new-date').value = getSelectedDateValue();
         });
     }
     
     // Fermer le modal
     if (closeNewModal) {
         closeNewModal.addEventListener('click', () => {
+            editingReservationId = null;
+            document.getElementById('new-reservation-title').textContent = '➕ Nouvelle Réservation';
+            document.getElementById('submit-reservation-btn').textContent = 'Créer la réservation';
             newReservationModal.style.display = 'none';
             newReservationForm.reset();
         });
@@ -1294,6 +1348,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (cancelNewBtn) {
         cancelNewBtn.addEventListener('click', () => {
+            editingReservationId = null;
+            document.getElementById('new-reservation-title').textContent = '➕ Nouvelle Réservation';
+            document.getElementById('submit-reservation-btn').textContent = 'Créer la réservation';
             newReservationModal.style.display = 'none';
             newReservationForm.reset();
         });
@@ -1309,51 +1366,38 @@ document.addEventListener('DOMContentLoaded', () => {
                 date: document.getElementById('new-date').value,
                 time: document.getElementById('new-time').value,
                 numberOfPeople: parseInt(document.getElementById('new-people').value),
-                phoneNumber: document.getElementById('new-phone').value, // Corriger phone en phoneNumber
+                phoneNumber: document.getElementById('new-phone').value,
                 email: document.getElementById('new-email').value || '',
-                specialRequests: document.getElementById('new-requests').value || '',
-                status: 'confirmed', // Les réservations créées depuis l'app sont confirmées automatiquement
-                source: 'desktop' // Ajouter la source requise
+                specialRequests: document.getElementById('new-requests').value || ''
             };
             
-            // DEBUG: Afficher les données envoyées
-            console.log('Données envoyées:', formData);
-            alert('DEBUG - Données envoyées:\n' + JSON.stringify(formData, null, 2));
-            
             try {
-                // Utiliser la route desktop qui permet jusqu'à 80 couverts
-                const response = await fetch('https://restaurant-booking-backend-y3sp.onrender.com/api/reservations/desktop', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(formData)
-                });
-                
-                const result = await response.json();
-                
-                // DEBUG: Afficher la réponse d'erreur
-                console.log('Réponse du serveur:', result);
-                if (!result.success) {
-                    alert('DEBUG - Erreur serveur:\n' + JSON.stringify(result, null, 2));
-                }
+                const result = editingReservationId
+                    ? await api.updateReservation(editingReservationId, formData)
+                    : await api.createReservation({
+                        ...formData,
+                        status: 'confirmed',
+                        source: 'desktop'
+                    });
                 
                 if (result.success) {
-                    // Afficher une notification de succès
-                    showNotification('Succès', 'Réservation créée avec succès');
+                    showNotification('Succès', editingReservationId
+                        ? 'Réservation modifiée avec succès'
+                        : 'Réservation créée avec succès');
                     
-                    // Fermer le modal et réinitialiser le formulaire
                     newReservationModal.style.display = 'none';
                     newReservationForm.reset();
+                    editingReservationId = null;
+                    document.getElementById('new-reservation-title').textContent = '➕ Nouvelle Réservation';
+                    document.getElementById('submit-reservation-btn').textContent = 'Créer la réservation';
                     
-                    // Recharger les réservations
-                    loadReservations();
+                    await loadReservations();
                 } else {
                     alert('Erreur: ' + result.message);
                 }
             } catch (error) {
-                console.error('Erreur lors de la création de la réservation:', error);
-                alert('Erreur lors de la création de la réservation');
+                console.error('Erreur lors de l\'enregistrement de la réservation:', error);
+                alert(`Erreur lors de l'enregistrement de la réservation: ${error.message}`);
             }
         });
     }
@@ -1361,55 +1405,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Fermer le modal en cliquant en dehors
     window.addEventListener('click', (event) => {
         if (event.target === newReservationModal) {
+            editingReservationId = null;
+            document.getElementById('new-reservation-title').textContent = '➕ Nouvelle Réservation';
+            document.getElementById('submit-reservation-btn').textContent = 'Créer la réservation';
             newReservationModal.style.display = 'none';
             newReservationForm.reset();
         }
     });
-
-    // QR Code pour accès tablette
-    const qrModal = document.getElementById('qr-modal');
-    const showQrBtn = document.getElementById('show-qr-btn');
-    const closeQrModal = document.querySelector('.close-qr-modal');
-    const qrCodeImg = document.getElementById('qr-code-img');
-    const adminUrlDisplay = document.getElementById('admin-url-display');
-    const copyUrlBtn = document.getElementById('copy-url-btn');
-
-    const ADMIN_URL = 'https://restaurant-booking-backend-y3sp.onrender.com/admin/';
-
-    if (showQrBtn) {
-        showQrBtn.addEventListener('click', () => {
-            // Générer le QR code via API
-            const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(ADMIN_URL)}`;
-            qrCodeImg.src = qrApiUrl;
-            adminUrlDisplay.textContent = ADMIN_URL;
-            qrModal.style.display = 'block';
-        });
-    }
-
-    if (closeQrModal) {
-        closeQrModal.addEventListener('click', () => {
-            qrModal.style.display = 'none';
-        });
-    }
-
-    if (copyUrlBtn) {
-        copyUrlBtn.addEventListener('click', () => {
-            navigator.clipboard.writeText(ADMIN_URL).then(() => {
-                copyUrlBtn.textContent = '✅ Copié !';
-                setTimeout(() => {
-                    copyUrlBtn.textContent = '📋 Copier l\'URL';
-                }, 2000);
-            });
-        });
-    }
-
-    // Fermer le QR modal en cliquant en dehors
-    window.addEventListener('click', (event) => {
-        if (event.target === qrModal) {
-            qrModal.style.display = 'none';
-        }
-    });
-
+    
     // Charger les réservations au démarrage
     console.log('Chargement des réservations au démarrage...');
     loadReservations();

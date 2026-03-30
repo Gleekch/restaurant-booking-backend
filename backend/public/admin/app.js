@@ -113,12 +113,37 @@ function renderView() {
     }
 }
 
-// Render Today View
+// Render Today View (ou prochaine date avec des réservations si aujourd'hui est vide)
 function renderTodayView() {
-    const today = new Date().toDateString();
-    const todayReservations = reservations.filter(r =>
-        new Date(r.date).toDateString() === today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    let displayDate = today;
+    let todayReservations = reservations.filter(r =>
+        new Date(r.date).toDateString() === today.toDateString()
     );
+
+    // Si aucune réservation aujourd'hui, trouver la prochaine date
+    if (todayReservations.length === 0 && reservations.length > 0) {
+        const futureDates = reservations
+            .filter(r => {
+                const d = new Date(r.date);
+                d.setHours(0, 0, 0, 0);
+                return d >= today && r.status !== 'cancelled';
+            })
+            .map(r => new Date(r.date))
+            .sort((a, b) => a - b);
+        if (futureDates.length > 0) {
+            displayDate = futureDates[0];
+            todayReservations = reservations.filter(r =>
+                new Date(r.date).toDateString() === displayDate.toDateString()
+            );
+        }
+    }
+
+    const isToday = displayDate.toDateString() === new Date().toDateString();
+    const dateLabel = isToday
+        ? `Aujourd'hui - ${displayDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}`
+        : `${displayDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}`;
 
     const midi = todayReservations.filter(r => parseInt(r.time.split(':')[0]) < 15);
     const soir = todayReservations.filter(r => parseInt(r.time.split(':')[0]) >= 15);
@@ -128,7 +153,7 @@ function renderTodayView() {
 
     content.innerHTML = `
         <div class="summary-card">
-            <h2 class="summary-title">Aujourd'hui - ${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
+            <h2 class="summary-title">${dateLabel}</h2>
             <div class="summary-stats">
                 <div class="stat-item">
                     <div class="stat-value">${todayReservations.length}</div>
