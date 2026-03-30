@@ -660,11 +660,12 @@ function initNewReservationForm() {
             time: document.getElementById('time').value,
             numberOfPeople: parseInt(document.getElementById('numberOfPeople').value),
             specialRequests: document.getElementById('specialRequests').value || undefined,
+            source: 'desktop',
             status: 'confirmed'
         };
 
         try {
-            const response = await fetch(`${API_URL}/api/reservations`, {
+            const response = await fetch(`${API_URL}/api/reservations/desktop`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
