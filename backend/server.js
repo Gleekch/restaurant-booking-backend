@@ -55,6 +55,11 @@ const reservationLimiter = rateLimit({
 });
 
 // Protection admin avec Basic Auth
+// Injecter l'API key dans la page pour que les fetch() passent
+app.get('/admin/config.js', basicAuth, (req, res) => {
+  res.type('application/javascript');
+  res.send(`window.__API_KEY = "${process.env.API_KEY || ''}";`);
+});
 app.use('/admin', basicAuth, express.static(path.join(__dirname, 'public', 'admin')));
 
 // MongoDB Connection

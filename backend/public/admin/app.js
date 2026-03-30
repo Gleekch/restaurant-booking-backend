@@ -3,9 +3,13 @@ const API_URL = window.location.origin;
 let reservations = [];
 let currentView = 'today';
 
-// Fetch wrapper qui envoie les credentials Basic Auth
+// Fetch wrapper qui envoie l'API key (injectée par config.js)
 function apiFetch(url, options = {}) {
-    return fetch(url, { ...options, credentials: 'include' });
+    const headers = options.headers || {};
+    if (window.__API_KEY) {
+        headers['X-API-Key'] = window.__API_KEY;
+    }
+    return fetch(url, { ...options, headers });
 }
 
 // DOM Elements
