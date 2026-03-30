@@ -144,18 +144,11 @@ function createWindow() {
     mainWindow = null;
   });
 
-  mainWindow.on('minimize', (event) => {
-    event.preventDefault();
-    mainWindow.hide();
-  });
-
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
-      mainWindow.hide();
+      mainWindow.minimize();
     }
-
-    return false;
   });
 }
 
