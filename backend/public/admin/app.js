@@ -148,8 +148,9 @@ function renderTodayView() {
         ? `Aujourd'hui - ${displayDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}`
         : `${displayDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}`;
 
-    const midi = todayReservations.filter(r => parseInt(r.time.split(':')[0]) < 15);
-    const soir = todayReservations.filter(r => parseInt(r.time.split(':')[0]) >= 15);
+    const active = todayReservations.filter(r => r.status !== 'cancelled');
+    const midi = active.filter(r => parseInt(r.time.split(':')[0]) < 15);
+    const soir = active.filter(r => parseInt(r.time.split(':')[0]) >= 15);
 
     const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
@@ -159,7 +160,7 @@ function renderTodayView() {
             <h2 class="summary-title">${dateLabel}</h2>
             <div class="summary-stats">
                 <div class="stat-item">
-                    <div class="stat-value">${todayReservations.length}</div>
+                    <div class="stat-value">${active.length}</div>
                     <div class="stat-label">Réservations</div>
                 </div>
                 <div class="stat-item">
@@ -430,7 +431,7 @@ function renderDayCard(day) {
     const isToday = dayStr === today;
 
     const dayReservations = reservations.filter(r =>
-        new Date(r.date).toDateString() === dayStr
+        new Date(r.date).toDateString() === dayStr && r.status !== 'cancelled'
     );
 
     const midi = dayReservations.filter(r => parseInt(r.time.split(':')[0]) < 15);
