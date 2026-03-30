@@ -3,6 +3,11 @@ const API_URL = window.location.origin;
 let reservations = [];
 let currentView = 'today';
 
+// Fetch wrapper qui envoie les credentials Basic Auth
+function apiFetch(url, options = {}) {
+    return fetch(url, { ...options, credentials: 'include' });
+}
+
 // DOM Elements
 const content = document.getElementById('content');
 const loading = document.getElementById('loading');
@@ -42,7 +47,7 @@ function initNavigation() {
 // Load Reservations
 async function loadReservations() {
     try {
-        const response = await fetch(`${API_URL}/api/reservations`);
+        const response = await apiFetch(`${API_URL}/api/reservations`);
         if (!response.ok) throw new Error('Erreur réseau');
 
         const data = await response.json();
@@ -602,7 +607,7 @@ function closeModal() {
 // Update Reservation Status
 async function updateStatus(id, status) {
     try {
-        const response = await fetch(`${API_URL}/api/reservations/${id}`, {
+        const response = await apiFetch(`${API_URL}/api/reservations/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status })
@@ -633,7 +638,7 @@ async function confirmAllPending() {
     let success = 0;
     for (const r of pending) {
         try {
-            const response = await fetch(`${API_URL}/api/reservations/${r._id}`, {
+            const response = await apiFetch(`${API_URL}/api/reservations/${r._id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: 'confirmed' })
@@ -667,7 +672,7 @@ function initNewReservationForm() {
         };
 
         try {
-            const response = await fetch(`${API_URL}/api/reservations/desktop`, {
+            const response = await apiFetch(`${API_URL}/api/reservations/desktop`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
