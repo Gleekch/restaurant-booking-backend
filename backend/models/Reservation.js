@@ -48,6 +48,10 @@ const reservationSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  reminder24hSentAt: {
+    type: Date,
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now
