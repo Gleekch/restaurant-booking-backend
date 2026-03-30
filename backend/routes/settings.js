@@ -64,65 +64,24 @@ router.get('/hours/:day', (req, res) => {
 });
 
 // Vérifier la disponibilité
+// Disponibilité — redirige vers le vrai endpoint dans /api/reservations/availability
+// Conservé pour compatibilité, mais l'endpoint canonique est GET /api/reservations/availability
 router.post('/availability', async (req, res) => {
   const { date, time, numberOfPeople } = req.body;
-  
-  // Logique simplifiée de vérification de disponibilité
-  // Dans un cas réel, on vérifierait les réservations existantes
-  
-  const dayOfWeek = new Date(date).toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
-  const dayHours = settings.hours[dayOfWeek];
-  
-  if (dayHours.closed) {
-    return res.json({
-      success: false,
-      available: false,
-      message: 'Le restaurant est fermé ce jour-là'
+  if (!date || !time) {
+    return res.json({ success: false, available: false, message: 'Date et heure requises' });
+  }
+  const { checkAvailability } = require('../services/capacityService');
+  try {
+    const result = await checkAvailability(date, time, numberOfPeople || 2, 50);
+    res.json({
+      success: true,
+      available: result.available,
+      message: result.available ? 'Créneau disponible' : `Créneau complet à ${result.peakSlot} (${result.peakOccupancy}/${result.capacity} couverts)`
     });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
-  
-  // Vérifier si l'heure est dans les créneaux d'ouverture
-  const requestedTime = parseInt(time.replace(':', ''));
-  let isInOpenHours = false;
-  
-  if (dayHours.lunch) {
-    const [lunchStart, lunchEnd] = dayHours.lunch.split('-').map(t => parseInt(t.replace(':', '')));
-    if (requestedTime >= lunchStart && requestedTime <= lunchEnd) {
-      isInOpenHours = true;
-    }
-  }
-  
-  if (dayHours.dinner) {
-    const [dinnerStart, dinnerEnd] = dayHours.dinner.split('-').map(t => parseInt(t.replace(':', '')));
-    if (requestedTime >= dinnerStart && requestedTime <= dinnerEnd) {
-      isInOpenHours = true;
-    }
-  }
-  
-  if (!isInOpenHours) {
-    return res.json({
-      success: false,
-      available: false,
-      message: 'Le restaurant est fermé à cette heure'
-    });
-  }
-  
-  if (numberOfPeople > settings.capacity.maxGroupSize) {
-    return res.json({
-      success: false,
-      available: false,
-      message: `Nous ne pouvons accueillir que ${settings.capacity.maxGroupSize} personnes maximum par réservation`
-    });
-  }
-  
-  // Ici, on devrait vérifier les réservations existantes
-  // Pour l'instant, on retourne toujours disponible
-  
-  res.json({
-    success: true,
-    available: true,
-    message: 'Créneau disponible'
-  });
 });
 
 // Mettre à jour les paramètres (protégé par API key)

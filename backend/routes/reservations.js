@@ -258,17 +258,8 @@ router.put('/:id', apiKey, async (req, res) => {
       const checkTime = time || existing.time;
       const checkPeople = numberOfPeople || existing.numberOfPeople;
 
-      // Simuler la suppression de l'ancienne réservation pour le check
-      // On vérifie la capacité SANS compter la réservation actuelle
-      const oldStatus = existing.status;
-      existing.status = 'cancelled'; // temporairement exclue du calcul
-      await existing.save();
-
-      const availability = await checkAvailability(checkDate, checkTime, checkPeople, CAPACITY);
-
-      // Restaurer le statut original
-      existing.status = oldStatus;
-      await existing.save();
+      // Exclure la réservation courante du calcul de capacité
+      const availability = await checkAvailability(checkDate, checkTime, checkPeople, CAPACITY, req.params.id);
 
       if (!availability.available) {
         return res.status(400).json({

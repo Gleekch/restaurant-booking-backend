@@ -33,17 +33,24 @@ function getMealDuration(timeMinutes) {
 /**
  * Pour une date donnée, retourne le nombre de couverts occupés à chaque créneau de 15min
  * en tenant compte de la durée des repas.
+ * @param {string} date
+ * @param {string} [excludeId] - ID de réservation à exclure du calcul (pour PUT)
  */
-async function getOccupancyMap(date) {
+async function getOccupancyMap(date, excludeId) {
   const startOfDay = new Date(date);
   startOfDay.setHours(0, 0, 0, 0);
   const endOfDay = new Date(date);
   endOfDay.setHours(23, 59, 59, 999);
 
-  const reservations = await Reservation.find({
+  const query = {
     date: { $gte: startOfDay, $lte: endOfDay },
     status: { $ne: 'cancelled' }
-  });
+  };
+  if (excludeId) {
+    query._id = { $ne: excludeId };
+  }
+
+  const reservations = await Reservation.find(query);
 
   // Map de créneau (en minutes depuis minuit) -> nombre de couverts occupés
   const occupancy = {};
@@ -71,11 +78,12 @@ async function getOccupancyMap(date) {
  * @param {string} time - Heure HH:MM
  * @param {number} numberOfPeople - Nombre de couverts
  * @param {number} limit - Capacité max (50 web, 70 desktop)
+ * @param {string} [excludeId] - ID de réservation à exclure (pour revalidation PUT)
  * @returns {{ available: boolean, peakOccupancy: number, peakSlot: string, capacity: number }}
  */
-async function checkAvailability(date, time, numberOfPeople, limit) {
+async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
   const effectiveLimit = Math.min(limit, CAPACITY);
-  const { occupancy } = await getOccupancyMap(date);
+  const { occupancy } = await getOccupancyMap(date, excludeId);
 
   const startMin = timeToMinutes(time);
   const duration = getMealDuration(startMin);
