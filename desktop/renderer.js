@@ -106,13 +106,10 @@ function formatLongDate(dateValue) {
 }
 
 function hideSections() {
-    reservationsContainer.style.display = 'none';
-    clientsSection.style.display = 'none';
-    weekSection.style.display = 'none';
-    monthSection.style.display = 'none';
-    statisticsSection.style.display = 'none';
-    serviceDetailSection.style.display = 'none';
-    pendingSection.style.display = 'none';
+    [reservationsContainer, clientsSection, weekSection, monthSection,
+     statisticsSection, serviceDetailSection, pendingSection].forEach(el => {
+        if (el) el.style.display = 'none';
+    });
 }
 
 function switchView(view) {
@@ -572,9 +569,12 @@ function updateStats() {
     const confirmedCovers = confirmedReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const pendingCovers = pendingReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
     
-    document.getElementById('today-count').textContent = activeReservations.length;
-    document.getElementById('today-covers').textContent = `${totalCovers} (${confirmedCovers} confirmés + ${pendingCovers} en attente)`;
-    document.getElementById('today-confirmed').textContent = confirmedReservations.length;
+    const countEl = document.getElementById('today-count');
+    const coversEl = document.getElementById('today-covers');
+    const confirmedEl = document.getElementById('today-confirmed');
+    if (countEl) countEl.textContent = activeReservations.length;
+    if (coversEl) coversEl.textContent = `${totalCovers} (${confirmedCovers} confirmés + ${pendingCovers} en attente)`;
+    if (confirmedEl) confirmedEl.textContent = confirmedReservations.length;
 }
 
 // Afficher une notification
@@ -1202,92 +1202,9 @@ function displayPending() {
     });
 }
 
-// Vue Aujourd'hui améliorée
+// Vue Aujourd'hui
 function displayTodayView() {
     renderOperationalDayView();
-    return;
-
-    const reservationsContainer = document.getElementById('reservations-container');
-    const today = new Date().toDateString();
-    const todayReservations = reservations.filter(r => 
-        new Date(r.date).toDateString() === today
-    );
-    
-    // Séparer midi et soir
-    const midiReservations = todayReservations.filter(r => {
-        const hour = parseInt(r.time.split(':')[0]);
-        return hour < 15;
-    });
-    
-    const soirReservations = todayReservations.filter(r => {
-        const hour = parseInt(r.time.split(':')[0]);
-        return hour >= 15;
-    });
-    
-    const midiCovers = midiReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
-    const soirCovers = soirReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
-    
-    // Afficher avec séparation claire midi/soir
-    reservationsContainer.innerHTML = `
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
-            <div style="background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); padding: 15px; border-radius: 10px;">
-                <h3>☀️ Service du Midi (12h00 - 13h15)</h3>
-                <p style="font-size: 24px; font-weight: bold;">${midiCovers}/50 couverts</p>
-                <p>${midiReservations.length} réservations</p>
-                <div style="width: 100%; background: rgba(255,255,255,0.5); height: 10px; border-radius: 5px; margin-top: 10px;">
-                    <div style="width: ${(midiCovers/50)*100}%; background: ${midiCovers >= 50 ? '#dc3545' : midiCovers >= 40 ? '#ffc107' : '#28a745'}; height: 10px; border-radius: 5px;"></div>
-                </div>
-            </div>
-            <div style="background: linear-gradient(135deg, #d1ecf1 0%, #a8d8ea 100%); padding: 15px; border-radius: 10px;">
-                <h3>🌙 Service du Soir (18h30 - 21h00)</h3>
-                <p style="font-size: 24px; font-weight: bold;">${soirCovers}/50 couverts</p>
-                <p>${soirReservations.length} réservations</p>
-                <div style="width: 100%; background: rgba(255,255,255,0.5); height: 10px; border-radius: 5px; margin-top: 10px;">
-                    <div style="width: ${(soirCovers/50)*100}%; background: ${soirCovers >= 50 ? '#dc3545' : soirCovers >= 40 ? '#ffc107' : '#28a745'}; height: 10px; border-radius: 5px;"></div>
-                </div>
-            </div>
-        </div>
-        
-        <h3 style="margin-bottom: 10px;">☀️ Midi - ${midiReservations.length} réservations</h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; margin-bottom: 30px;">
-            ${midiReservations.map(reservation => `
-                <div class="reservation-card ${reservation.status}" data-id="${reservation._id}">
-                    <div class="reservation-time">${reservation.time}</div>
-                    <div class="reservation-name">${reservation.customerName}</div>
-                    <div class="reservation-details">
-                        <span>👥 ${reservation.numberOfPeople} personnes</span>
-                        ${reservation.phoneNumber ? `<span>📱 ${reservation.phoneNumber}</span>` : ''}
-                    </div>
-                    ${reservation.specialRequests ? `<div class="reservation-note">📝 ${reservation.specialRequests}</div>` : ''}
-                    <div class="reservation-status status-${reservation.status}">
-                        ${reservation.status === 'confirmed' ? '✅ Confirmée' : 
-                          reservation.status === 'cancelled' ? '❌ Annulée' : 
-                          '⏳ En attente'}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-        
-        <h3 style="margin-bottom: 10px;">🌙 Soir - ${soirReservations.length} réservations</h3>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
-            ${soirReservations.map(reservation => `
-                <div class="reservation-card ${reservation.status}" data-id="${reservation._id}">
-                    <div class="reservation-time">${reservation.time}</div>
-                    <div class="reservation-name">${reservation.customerName}</div>
-                    <div class="reservation-details">
-                        <span>👥 ${reservation.numberOfPeople} personnes</span>
-                        ${reservation.phoneNumber ? `<span>📱 ${reservation.phoneNumber}</span>` : ''}
-                    </div>
-                    ${reservation.specialRequests ? `<div class="reservation-note">📝 ${reservation.specialRequests}</div>` : ''}
-                    <div class="reservation-status status-${reservation.status}">
-                        ${reservation.status === 'confirmed' ? '✅ Confirmée' : 
-                          reservation.status === 'cancelled' ? '❌ Annulée' : 
-                          '⏳ En attente'}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
 }
 
 // Demander la permission pour les notifications
@@ -1413,6 +1330,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
+    // Gestion du QR modal
+    const showQrBtn = document.getElementById('show-qr-btn');
+    const qrModal = document.getElementById('qr-modal');
+    const closeQrModal = document.querySelector('.close-qr-modal');
+    if (showQrBtn && qrModal) {
+        showQrBtn.addEventListener('click', () => { qrModal.style.display = 'block'; });
+    }
+    if (closeQrModal && qrModal) {
+        closeQrModal.addEventListener('click', () => { qrModal.style.display = 'none'; });
+    }
+
     // Charger les réservations au démarrage
     console.log('Chargement des réservations au démarrage...');
     loadReservations();
