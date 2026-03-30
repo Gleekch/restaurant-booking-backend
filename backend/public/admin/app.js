@@ -108,6 +108,9 @@ function renderView() {
         case 'week':
             renderWeekView();
             break;
+        case 'month':
+            renderMonthView();
+            break;
         default:
             renderTodayView();
     }
@@ -257,6 +260,116 @@ function renderWeekView() {
             showDayServiceDetail(date, service);
         });
     });
+}
+
+// State for month navigation
+let currentMonthDate = new Date();
+
+// Render Month View
+function renderMonthView() {
+    const firstDay = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), 1);
+    const firstGridDay = new Date(firstDay);
+    const firstGridWeekDay = firstGridDay.getDay() || 7;
+    firstGridDay.setDate(firstGridDay.getDate() - firstGridWeekDay + 1);
+
+    const monthLabel = firstDay.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    const weekLabels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+    const days = [];
+    for (let i = 0; i < 42; i++) {
+        const d = new Date(firstGridDay);
+        d.setDate(firstGridDay.getDate() + i);
+        days.push(d);
+    }
+
+    const todayStr = new Date().toDateString();
+
+    content.innerHTML = `
+        <div class="month-toolbar">
+            <button class="btn-month-nav" id="month-prev">&larr;</button>
+            <h2 class="month-title">${monthLabel}</h2>
+            <button class="btn-month-nav" id="month-next">&rarr;</button>
+        </div>
+        <div class="month-grid">
+            ${weekLabels.map(l => `<div class="month-weekday-label">${l}</div>`).join('')}
+            ${days.map(day => {
+                const dateISO = day.toISOString().split('T')[0];
+                const dayReservations = reservations.filter(r =>
+                    new Date(r.date).toDateString() === day.toDateString()
+                );
+                const active = dayReservations.filter(r => r.status !== 'cancelled');
+                const midi = active.filter(r => parseInt(r.time.split(':')[0]) < 15);
+                const soir = active.filter(r => parseInt(r.time.split(':')[0]) >= 15);
+                const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
+                const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
+                const isToday = day.toDateString() === todayStr;
+                const isOutside = day.getMonth() !== firstDay.getMonth();
+
+                return `
+                    <div class="month-day ${isToday ? 'month-today' : ''} ${isOutside ? 'month-outside' : ''}" data-day-date="${dateISO}">
+                        <div class="month-day-num">${day.getDate()}</div>
+                        ${active.length > 0 ? `
+                            <div class="month-day-midi">☀️ ${midi.length}r / ${midiCovers}c</div>
+                            <div class="month-day-soir">🌙 ${soir.length}r / ${soirCovers}c</div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    `;
+
+    document.getElementById('month-prev').addEventListener('click', () => {
+        currentMonthDate.setMonth(currentMonthDate.getMonth() - 1);
+        renderMonthView();
+    });
+    document.getElementById('month-next').addEventListener('click', () => {
+        currentMonthDate.setMonth(currentMonthDate.getMonth() + 1);
+        renderMonthView();
+    });
+    document.querySelectorAll('[data-day-date]').forEach(el => {
+        el.addEventListener('click', () => {
+            showDayDetail(el.dataset.dayDate);
+        });
+    });
+}
+
+// Show day detail from month view
+function showDayDetail(dateISO) {
+    const date = new Date(dateISO);
+    const dayReservations = reservations.filter(r =>
+        new Date(r.date).toDateString() === date.toDateString()
+    );
+    const active = dayReservations.filter(r => r.status !== 'cancelled');
+    const midi = active.filter(r => parseInt(r.time.split(':')[0]) < 15).sort((a, b) => a.time.localeCompare(b.time));
+    const soir = active.filter(r => parseInt(r.time.split(':')[0]) >= 15).sort((a, b) => a.time.localeCompare(b.time));
+    const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+    content.innerHTML = `
+        <button class="back-btn" onclick="renderMonthView()">← Retour au mois</button>
+        <div class="summary-card">
+            <h2 class="summary-title">${dateStr}</h2>
+            <div class="summary-stats">
+                <div class="stat-item">
+                    <div class="stat-value">${active.length}</div>
+                    <div class="stat-label">Réservations</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value">${active.reduce((s, r) => s + r.numberOfPeople, 0)}</div>
+                    <div class="stat-label">Couverts</div>
+                </div>
+            </div>
+        </div>
+        <div class="service-section">
+            <div class="service-header midi"><span>☀️</span><h3>Midi</h3><span class="service-count">${midi.length} rés. / ${midi.reduce((s, r) => s + r.numberOfPeople, 0)} couv.</span></div>
+            ${midi.length === 0 ? '<div class="empty-state"><p>Aucune réservation</p></div>' :
+                `<div class="reservations-grid">${midi.map(r => renderReservationCard(r)).join('')}</div>`}
+        </div>
+        <div class="service-section">
+            <div class="service-header soir"><span>🌙</span><h3>Soir</h3><span class="service-count">${soir.length} rés. / ${soir.reduce((s, r) => s + r.numberOfPeople, 0)} couv.</span></div>
+            ${soir.length === 0 ? '<div class="empty-state"><p>Aucune réservation</p></div>' :
+                `<div class="reservations-grid">${soir.map(r => renderReservationCard(r)).join('')}</div>`}
+        </div>
+    `;
+    attachCardListeners();
 }
 
 // Render Reservation Card
