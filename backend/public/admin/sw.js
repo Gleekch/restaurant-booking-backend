@@ -1,4 +1,4 @@
-const CACHE_NAME = 'murmure-admin-v1';
+const CACHE_NAME = 'murmure-admin-v2';
 const urlsToCache = [
   '/admin/',
   '/admin/index.html',
