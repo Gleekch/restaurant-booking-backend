@@ -2,47 +2,24 @@ const express = require('express');
 const router = express.Router();
 const Reservation = require('../models/Reservation');
 const { sendNotifications } = require('../services/notificationService');
+const { checkAvailability, CAPACITY } = require('../services/capacityService');
 
-// Créer une réservation depuis l'application desktop (jusqu'à 80 couverts)
+// Créer une réservation depuis l'application desktop (capacité complète du restaurant)
 router.post('/desktop', async (req, res) => {
   try {
     const { date, time, numberOfPeople } = req.body;
-    
-    // Déterminer si c'est midi ou soir
-    const hour = parseInt(time.split(':')[0]);
-    const isMidi = hour < 15;
-    
-    // Vérifier les réservations existantes pour ce service
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
-    
-    const existingReservations = await Reservation.find({
-      date: { $gte: startOfDay, $lte: endOfDay },
-      status: { $ne: 'cancelled' }
-    });
-    
-    const serviceReservations = existingReservations.filter(r => {
-      const resHour = parseInt(r.time.split(':')[0]);
-      if (isMidi) {
-        return resHour < 15;
-      } else {
-        return resHour >= 15;
-      }
-    });
-    
-    const totalCouverts = serviceReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
-    const serviceName = isMidi ? 'midi' : 'soir';
-    
-    // Pour l'app desktop, limite à 80 couverts
-    if (totalCouverts + numberOfPeople > 80) {
+
+    // Vérifier la capacité par créneau (desktop = capacité totale restaurant)
+    const availability = await checkAvailability(date, time, numberOfPeople, CAPACITY);
+    if (!availability.available) {
+      const hour = parseInt(time.split(':')[0]);
+      const serviceName = hour < 15 ? 'midi' : 'soir';
       return res.status(400).json({
         success: false,
-        message: `Désolé, le service du ${serviceName} est complet (${totalCouverts}/80 couverts).`
+        message: `Désolé, le service du ${serviceName} est complet à ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts).`
       });
     }
-    
+
     const reservation = new Reservation(req.body);
     await reservation.save();
     
@@ -144,34 +121,14 @@ router.post('/', async (req, res) => {
       });
     }
     
-    // Récupérer toutes les réservations du jour et du service
-    const startDate = new Date(date);
-    startDate.setHours(0, 0, 0, 0);
-    const endDate = new Date(date);
-    endDate.setHours(23, 59, 59, 999);
-    
-    const existingReservations = await Reservation.find({
-      date: { $gte: startDate, $lte: endDate },
-      status: { $ne: 'cancelled' } // Ne pas compter les réservations annulées
-    });
-    
-    // Calculer les couverts par service
-    const serviceReservations = existingReservations.filter(r => {
-      const resHour = parseInt(r.time.split(':')[0]);
-      if (isMidi) {
-        return resHour >= 12 && resHour < 15;
-      } else {
-        return resHour >= 18 && resHour < 23;
-      }
-    });
-    
-    const totalCouverts = serviceReservations.reduce((sum, r) => sum + r.numberOfPeople, 0);
-    const serviceName = isMidi ? 'midi' : 'soir';
-    
-    if (totalCouverts + numberOfPeople > 50) {
+    // Vérifier la capacité par créneau (web = limite 50 pour garder de la marge)
+    const WEB_LIMIT = 50;
+    const availability = await checkAvailability(date, time, numberOfPeople, WEB_LIMIT);
+    if (!availability.available) {
+      const serviceName = isMidi ? 'midi' : 'soir';
       return res.status(400).json({
         success: false,
-        message: `Désolé, les réservations en ligne pour le service du ${serviceName} sont complètes (${totalCouverts}/50 réservations). Vous pouvez essayer de venir directement au restaurant ou choisir un autre créneau.`
+        message: `Désolé, les réservations en ligne pour le service du ${serviceName} sont complètes à ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts). Vous pouvez essayer de venir directement au restaurant ou choisir un autre créneau.`
       });
     }
     
@@ -202,6 +159,22 @@ router.post('/', async (req, res) => {
       success: false,
       message: error.message
     });
+  }
+});
+
+// Vérifier la disponibilité par créneau pour une date
+router.get('/availability', async (req, res) => {
+  try {
+    const { date, people } = req.query;
+    if (!date) {
+      return res.status(400).json({ success: false, message: 'Paramètre date requis' });
+    }
+    const { getAvailableSlots } = require('../services/capacityService');
+    const numberOfPeople = parseInt(people) || 2;
+    const slots = await getAvailableSlots(date, numberOfPeople, 50);
+    res.json({ success: true, data: slots });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 });
 
