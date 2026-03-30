@@ -4,21 +4,34 @@
  * - basicAuth : protection Basic Auth HTTP pour /admin/
  */
 
-// API Key middleware — protège les routes opérateur (desktop, notifications, settings)
+// API Key middleware — protège les routes opérateur
+// Accepte soit X-API-Key header, soit Basic Auth valide (pour la page admin)
 function apiKey(req, res, next) {
-  const key = req.headers['x-api-key'];
   const validKey = process.env.API_KEY;
 
   if (!validKey) {
-    // Si API_KEY n'est pas configurée, laisser passer (dev mode)
+    return next(); // dev mode
+  }
+
+  // Option 1 : API key header (desktop, scripts)
+  const key = req.headers['x-api-key'];
+  if (key && key === validKey) {
     return next();
   }
 
-  if (!key || key !== validKey) {
-    return res.status(401).json({ success: false, message: 'Clé API invalide ou manquante' });
+  // Option 2 : Basic Auth valide (page admin dans le navigateur)
+  const user = process.env.ADMIN_USER;
+  const pass = process.env.ADMIN_PASS;
+  const authHeader = req.headers.authorization;
+  if (user && pass && authHeader && authHeader.startsWith('Basic ')) {
+    const credentials = Buffer.from(authHeader.split(' ')[1], 'base64').toString();
+    const [inputUser, inputPass] = credentials.split(':');
+    if (inputUser === user && inputPass === pass) {
+      return next();
+    }
   }
 
-  next();
+  return res.status(401).json({ success: false, message: 'Authentification requise' });
 }
 
 // Basic Auth middleware — protège la page admin /admin/
