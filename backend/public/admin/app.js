@@ -293,7 +293,7 @@ function renderMonthView() {
         <div class="month-grid">
             ${weekLabels.map(l => `<div class="month-weekday-label">${l}</div>`).join('')}
             ${days.map(day => {
-                const dateISO = day.toISOString().split('T')[0];
+                const dateISO = day.getFullYear() + '-' + String(day.getMonth()+1).padStart(2,'0') + '-' + String(day.getDate()).padStart(2,'0');
                 const dayReservations = reservations.filter(r =>
                     new Date(r.date).toDateString() === day.toDateString()
                 );
@@ -442,7 +442,7 @@ function renderDayCard(day) {
     const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
 
-    const dateISO = day.toISOString().split('T')[0];
+    const dateISO = day.getFullYear() + '-' + String(day.getMonth()+1).padStart(2,'0') + '-' + String(day.getDate()).padStart(2,'0');
     const dayNames = ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
 
     const getProgressClass = (count) => {
