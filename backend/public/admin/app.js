@@ -172,7 +172,7 @@ function renderTodayView() {
 
         <div class="service-section">
             <div class="service-header midi">
-                <span>☀️</span>
+                <span class="icon">☀️</span>
                 <h3>Service du Midi</h3>
                 <span class="service-count">${midi.length} rés. / ${midiCovers} couv.</span>
             </div>
@@ -184,7 +184,7 @@ function renderTodayView() {
 
         <div class="service-section">
             <div class="service-header soir">
-                <span>🌙</span>
+                <span class="icon">🌙</span>
                 <h3>Service du Soir</h3>
                 <span class="service-count">${soir.length} rés. / ${soirCovers} couv.</span>
             </div>
@@ -305,12 +305,14 @@ function renderMonthView() {
                 const isToday = day.toDateString() === todayStr;
                 const isOutside = day.getMonth() !== firstDay.getMonth();
 
+                const dayClasses = ['month-day', isToday ? 'month-today' : '', isOutside ? 'month-outside' : '', midi.length > 0 ? 'has-midi' : '', soir.length > 0 ? 'has-soir' : ''].filter(Boolean).join(' ');
+
                 return `
-                    <div class="month-day ${isToday ? 'month-today' : ''} ${isOutside ? 'month-outside' : ''}" data-day-date="${dateISO}">
+                    <div class="${dayClasses}" data-day-date="${dateISO}">
                         <div class="month-day-num">${day.getDate()}</div>
                         ${active.length > 0 ? `
-                            <div class="month-day-midi">☀️ ${midi.length}r / ${midiCovers}c</div>
-                            <div class="month-day-soir">🌙 ${soir.length}r / ${soirCovers}c</div>
+                            <div class="month-day-midi"><span class="icon">☀️</span> ${midi.length}r / ${midiCovers}c</div>
+                            <div class="month-day-soir"><span class="icon">🌙</span> ${soir.length}r / ${soirCovers}c</div>
                         ` : ''}
                     </div>
                 `;
@@ -390,10 +392,10 @@ function renderReservationCard(r) {
             </div>
             <div class="card-name">${r.customerName}</div>
             <div class="card-info">
-                <span>👥 ${r.numberOfPeople}</span>
-                <span>📱 ${r.phoneNumber}</span>
+                <span><span class="icon">👥</span> ${r.numberOfPeople}</span>
+                <span><span class="icon">📱</span> ${r.phoneNumber}</span>
             </div>
-            ${r.specialRequests ? `<div class="card-notes">💬 ${r.specialRequests}</div>` : ''}
+            ${r.specialRequests ? `<div class="card-notes"><span class="icon">💬</span> ${r.specialRequests}</div>` : ''}
         </div>
     `;
 }
@@ -402,7 +404,7 @@ function renderReservationCard(r) {
 function renderPendingCard(r) {
     const date = new Date(r.date);
     const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-    const service = parseInt(r.time.split(':')[0]) < 15 ? '☀️ Midi' : '🌙 Soir';
+    const service = parseInt(r.time.split(':')[0]) < 15 ? '<span class="icon">☀️</span> Midi' : '<span class="icon">🌙</span> Soir';
 
     return `
         <div class="pending-card">
@@ -411,14 +413,14 @@ function renderPendingCard(r) {
                 <span class="card-status pending">En attente</span>
             </div>
             <div class="pending-card-info">
-                <p>📅 ${dateStr} - ${r.time} ${service}</p>
-                <p>👥 ${r.numberOfPeople} personne(s)</p>
-                <p>📱 ${r.phoneNumber}</p>
-                ${r.specialRequests ? `<p>💬 ${r.specialRequests}</p>` : ''}
+                <p><span class="icon">📅</span> ${dateStr} - ${r.time} ${service}</p>
+                <p><span class="icon">👥</span> ${r.numberOfPeople} personne(s)</p>
+                <p><span class="icon">📱</span> ${r.phoneNumber}</p>
+                ${r.specialRequests ? `<p><span class="icon">💬</span> ${r.specialRequests}</p>` : ''}
             </div>
             <div class="pending-actions">
-                <button class="btn-confirm" onclick="updateStatus('${r._id}', 'confirmed')">✅ Confirmer</button>
-                <button class="btn-cancel" onclick="updateStatus('${r._id}', 'cancelled')">❌ Annuler</button>
+                <button class="btn-confirm" onclick="updateStatus('${r._id}', 'confirmed')"><span class="icon">✅</span> Confirmer</button>
+                <button class="btn-cancel" onclick="updateStatus('${r._id}', 'cancelled')"><span class="icon">❌</span> Annuler</button>
             </div>
         </div>
     `;
@@ -454,14 +456,14 @@ function renderDayCard(day) {
             <div class="day-name">${dayNames[day.getDay()]}</div>
             <div class="day-date">${day.getDate()}/${day.getMonth() + 1}</div>
             <div class="day-service midi" data-date="${dateISO}" data-service="midi">
-                <div class="day-service-label">☀️ Midi</div>
+                <div class="day-service-label"><span class="icon">☀️</span> Midi</div>
                 <div class="day-service-count">${midiCovers}</div>
                 <div class="progress-bar">
                     <div class="progress-fill ${getProgressClass(midiCovers)}" style="width: ${Math.min(midiCovers/50*100, 100)}%"></div>
                 </div>
             </div>
             <div class="day-service soir" data-date="${dateISO}" data-service="soir">
-                <div class="day-service-label">🌙 Soir</div>
+                <div class="day-service-label"><span class="icon">🌙</span> Soir</div>
                 <div class="day-service-count">${soirCovers}</div>
                 <div class="progress-bar">
                     <div class="progress-fill ${getProgressClass(soirCovers)}" style="width: ${Math.min(soirCovers/50*100, 100)}%"></div>
@@ -476,7 +478,7 @@ function showDayServiceDetail(dateISO, service) {
     const [y, m, d] = dateISO.split('-').map(Number);
     const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
-        new Date(r.date).toDateString() === date.toDateString()
+        new Date(r.date).toDateString() === date.toDateString() && r.status !== 'cancelled'
     );
 
     const filtered = dayReservations.filter(r => {
@@ -580,10 +582,10 @@ function showReservationDetail(r) {
 
         <div class="detail-actions">
             ${r.status !== 'confirmed' ? `
-                <button class="btn btn-success" onclick="updateStatus('${r._id}', 'confirmed'); closeModal();">✅ Confirmer</button>
+                <button class="btn btn-success" onclick="updateStatus('${r._id}', 'confirmed'); closeModal();"><span class="icon">✅</span> Confirmer</button>
             ` : ''}
             ${r.status !== 'cancelled' ? `
-                <button class="btn btn-danger" onclick="updateStatus('${r._id}', 'cancelled'); closeModal();">❌ Annuler</button>
+                <button class="btn btn-danger" onclick="updateStatus('${r._id}', 'cancelled'); closeModal();"><span class="icon">❌</span> Annuler</button>
             ` : ''}
             <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
         </div>
