@@ -112,46 +112,63 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
 }
 
 /**
+ * Retourne les bornes horaires selon le jour (semaine vs weekend).
+ */
+function getServiceBounds(date) {
+  const d = new Date(date);
+  const day = d.getDay();
+  const isWeekend = day === 0 || day === 6;
+  return {
+    isWeekend,
+    midiStart: 720,             // 12:00
+    midiEnd: isWeekend ? 825 : 795,  // 13:45 weekend, 13:15 semaine
+    soirStart: 1110,            // 18:30
+    soirEnd: isWeekend ? 1290 : 1260  // 21:30 weekend, 21:00 semaine
+  };
+}
+
+/**
  * Retourne les créneaux disponibles pour une date et un nombre de personnes.
- * Utile pour le calendrier de disponibilité côté client.
+ * Tient compte des horaires weekend et des heures déjà passées.
  */
 async function getAvailableSlots(date, numberOfPeople, limit) {
   const effectiveLimit = Math.min(limit || CAPACITY, CAPACITY);
   const { occupancy } = await getOccupancyMap(date);
+  const bounds = getServiceBounds(date);
 
-  // Créneaux midi : 12:00 - 13:15 (toutes les 15min)
+  // Déterminer l'heure courante si c'est aujourd'hui
+  const now = new Date();
+  const requestDate = new Date(date);
+  requestDate.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const isToday = requestDate.getTime() === today.getTime();
+  const currentMinutes = isToday ? now.getHours() * 60 + now.getMinutes() : 0;
+
+  function formatTime(m) {
+    return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  }
+
+  function checkSlot(startMin, duration) {
+    // Créneau déjà passé
+    if (isToday && startMin < currentMinutes) return false;
+    for (let slot = startMin; slot < startMin + duration; slot += 15) {
+      if ((occupancy[slot] || 0) + numberOfPeople > effectiveLimit) return false;
+    }
+    return true;
+  }
+
   const midiSlots = [];
-  for (let m = 720; m <= 795; m += 15) {
-    const duration = MIDI_DURATION;
-    let canFit = true;
-    for (let slot = m; slot < m + duration; slot += 15) {
-      if ((occupancy[slot] || 0) + numberOfPeople > effectiveLimit) {
-        canFit = false;
-        break;
-      }
-    }
-    const h = String(Math.floor(m / 60)).padStart(2, '0');
-    const min = String(m % 60).padStart(2, '0');
-    midiSlots.push({ time: `${h}:${min}`, available: canFit });
+  for (let m = bounds.midiStart; m <= bounds.midiEnd; m += 15) {
+    midiSlots.push({ time: formatTime(m), available: checkSlot(m, MIDI_DURATION) });
   }
 
-  // Créneaux soir : 18:30 - 21:00 (toutes les 15min)
   const soirSlots = [];
-  for (let m = 1110; m <= 1260; m += 15) {
-    const duration = SOIR_DURATION;
-    let canFit = true;
-    for (let slot = m; slot < m + duration; slot += 15) {
-      if ((occupancy[slot] || 0) + numberOfPeople > effectiveLimit) {
-        canFit = false;
-        break;
-      }
-    }
-    const h = String(Math.floor(m / 60)).padStart(2, '0');
-    const min = String(m % 60).padStart(2, '0');
-    soirSlots.push({ time: `${h}:${min}`, available: canFit });
+  for (let m = bounds.soirStart; m <= bounds.soirEnd; m += 15) {
+    soirSlots.push({ time: formatTime(m), available: checkSlot(m, SOIR_DURATION) });
   }
 
-  return { midi: midiSlots, soir: soirSlots, capacity: effectiveLimit };
+  return { midi: midiSlots, soir: soirSlots, capacity: effectiveLimit, isWeekend: bounds.isWeekend };
 }
 
-module.exports = { checkAvailability, getAvailableSlots, getOccupancyMap, CAPACITY };
+module.exports = { checkAvailability, getAvailableSlots, getOccupancyMap, getServiceBounds, CAPACITY };

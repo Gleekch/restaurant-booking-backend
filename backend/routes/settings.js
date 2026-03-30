@@ -64,15 +64,30 @@ router.get('/hours/:day', (req, res) => {
 });
 
 // Vérifier la disponibilité
-// Disponibilité — redirige vers le vrai endpoint dans /api/reservations/availability
-// Conservé pour compatibilité, mais l'endpoint canonique est GET /api/reservations/availability
+// Disponibilité — délègue à capacityService (mêmes règles que POST /api/reservations)
+// DEPRECATED : utiliser GET /api/reservations/availability à la place
 router.post('/availability', async (req, res) => {
   const { date, time, numberOfPeople } = req.body;
   if (!date || !time) {
     return res.json({ success: false, available: false, message: 'Date et heure requises' });
   }
-  const { checkAvailability } = require('../services/capacityService');
+  const { checkAvailability, getServiceBounds } = require('../services/capacityService');
   try {
+    // Vérifier les bornes horaires (mêmes règles que POST /api/reservations)
+    const bounds = getServiceBounds(date);
+    const [h, m] = time.split(':').map(Number);
+    const timeMin = h * 60 + m;
+    const isMidi = timeMin >= bounds.midiStart && timeMin <= bounds.midiEnd;
+    const isSoir = timeMin >= bounds.soirStart && timeMin <= bounds.soirEnd;
+    if (!isMidi && !isSoir) {
+      const midiLimit = bounds.isWeekend ? '13h45' : '13h15';
+      const soirLimit = bounds.isWeekend ? '21h30' : '21h00';
+      return res.json({
+        success: false,
+        available: false,
+        message: `Réservations possibles de 12h00 à ${midiLimit} (midi) ou 18h30 à ${soirLimit} (soir)`
+      });
+    }
     const result = await checkAvailability(date, time, numberOfPeople || 2, 50);
     res.json({
       success: true,
