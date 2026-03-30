@@ -334,7 +334,8 @@ function renderMonthView() {
 
 // Show day detail from month view
 function showDayDetail(dateISO) {
-    const date = new Date(dateISO);
+    const [y, m, d] = dateISO.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
         new Date(r.date).toDateString() === date.toDateString()
     );
@@ -471,7 +472,8 @@ function renderDayCard(day) {
 
 // Show Day Service Detail
 function showDayServiceDetail(dateISO, service) {
-    const date = new Date(dateISO);
+    const [y, m, d] = dateISO.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
         new Date(r.date).toDateString() === date.toDateString()
     );
