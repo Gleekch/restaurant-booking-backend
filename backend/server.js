@@ -4,6 +4,8 @@ const cors = require('cors');
 const http = require('http');
 const path = require('path');
 const socketIo = require('socket.io');
+const rateLimit = require('express-rate-limit');
+const { apiKey, basicAuth } = require('./middleware/auth');
 require('dotenv').config();
 
 const app = express();
@@ -44,8 +46,15 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files (admin dashboard)
-app.use('/admin', express.static(path.join(__dirname, 'public', 'admin')));
+// Rate limiting — anti-spam sur la création de réservations publiques
+const reservationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // max 20 réservations par IP par fenêtre
+  message: { success: false, message: 'Trop de requêtes, réessayez dans 15 minutes' }
+});
+
+// Protection admin avec Basic Auth
+app.use('/admin', basicAuth, express.static(path.join(__dirname, 'public', 'admin')));
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/restaurant_booking', {
@@ -57,13 +66,16 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/restauran
   console.error('MongoDB connection error:', err);
 });
 
-// Routes
+// Routes publiques (avec rate limiting)
+app.post('/api/reservations', reservationLimiter);
 app.use('/api/reservations', require('./routes/reservations'));
-app.use('/api/notifications', require('./routes/notifications'));
-app.use('/api/voice', require('./routes/voice'));
 app.use('/api/menu', require('./routes/menu'));
-app.use('/api/settings', require('./routes/settings'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
+
+// Routes protégées (API key requise)
+app.use('/api/notifications', apiKey, require('./routes/notifications'));
+app.use('/api/voice', apiKey, require('./routes/voice'));
+app.use('/api/settings', apiKey, require('./routes/settings'));
 
 // WebSocket pour l'application desktop
 io.on('connection', (socket) => {

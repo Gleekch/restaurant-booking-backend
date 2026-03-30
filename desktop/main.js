@@ -53,6 +53,11 @@ function safeError(...args) {
 
 async function apiRequest(endpoint, options = {}) {
   const headers = {};
+  // Ajouter la clé API si configurée
+  const apiKeyValue = process.env.API_KEY;
+  if (apiKeyValue) {
+    headers['X-API-Key'] = apiKeyValue;
+  }
   const requestOptions = {
     method: options.method || 'GET',
     headers
