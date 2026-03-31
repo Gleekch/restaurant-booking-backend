@@ -642,8 +642,11 @@ if (serviceFilter) {
 // Fonction pour extraire et analyser les clients
 function extractClients(source = reservations) {
     const clientsMap = new Map();
-    
-    source.forEach(reservation => {
+
+    // Exclure les réservations annulées
+    const activeSource = source.filter(r => r.status !== 'cancelled');
+
+    activeSource.forEach(reservation => {
         const key = reservation.email || reservation.phoneNumber;
         if (!key) return;
         
