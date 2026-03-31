@@ -1334,11 +1334,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const showQrBtn = document.getElementById('show-qr-btn');
     const qrModal = document.getElementById('qr-modal');
     const closeQrModal = document.querySelector('.close-qr-modal');
+    const qrCodeImg = document.getElementById('qr-code-img');
+    const adminUrlDisplay = document.getElementById('admin-url-display');
+    const copyUrlBtn = document.getElementById('copy-url-btn');
+
     if (showQrBtn && qrModal) {
-        showQrBtn.addEventListener('click', () => { qrModal.style.display = 'block'; });
+        showQrBtn.addEventListener('click', async () => {
+            const config = await api.getConfig();
+            const adminUrl = config.backendUrl + '/admin/';
+            if (adminUrlDisplay) adminUrlDisplay.textContent = adminUrl;
+            if (qrCodeImg) {
+                qrCodeImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(adminUrl)}`;
+            }
+            qrModal.style.display = 'block';
+        });
     }
     if (closeQrModal && qrModal) {
         closeQrModal.addEventListener('click', () => { qrModal.style.display = 'none'; });
+    }
+    if (copyUrlBtn) {
+        copyUrlBtn.addEventListener('click', async () => {
+            const config = await api.getConfig();
+            const adminUrl = config.backendUrl + '/admin/';
+            navigator.clipboard.writeText(adminUrl);
+            copyUrlBtn.textContent = 'Copié !';
+            setTimeout(() => { copyUrlBtn.textContent = 'Copier l\'URL'; }, 2000);
+        });
     }
 
     // Charger les réservations au démarrage
