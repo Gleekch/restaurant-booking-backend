@@ -2,22 +2,59 @@ const { app, BrowserWindow, ipcMain, Tray, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const util = require('util');
-
-// Empêcher les crashs EPIPE quand stdout/stderr sont fermés (Windows sans console).
-// console.log lance l'erreur de manière synchrone, donc on doit wrapper les fonctions
-// plutôt que d'écouter l'événement 'error' du stream.
-const _log = console.log;
-const _error = console.error;
-const _warn = console.warn;
-console.log = (...a) => { try { _log.apply(console, a); } catch (e) { if (e.code !== 'EPIPE') throw e; } };
-console.error = (...a) => { try { _error.apply(console, a); } catch (e) { if (e.code !== 'EPIPE') throw e; } };
-console.warn = (...a) => { try { _warn.apply(console, a); } catch (e) { if (e.code !== 'EPIPE') throw e; } };
-
+const dotenv = require('dotenv');
 const io = require('socket.io-client');
-require('dotenv').config();
 
 const DEFAULT_BACKEND_URL = 'https://restaurant-booking-backend-y3sp.onrender.com';
+
+function getCandidateEnvPaths() {
+  const candidates = [
+    process.env.RESTAURANT_ENV_PATH,
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(__dirname, '..', '.env')
+  ].filter(Boolean);
+
+  if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, '.env'));
+  }
+
+  if (process.execPath) {
+    candidates.push(path.join(path.dirname(process.execPath), '.env'));
+  }
+
+  return [...new Set(candidates)];
+}
+
+function loadEnvironmentConfig() {
+  for (const envPath of getCandidateEnvPaths()) {
+    if (!fs.existsSync(envPath)) {
+      continue;
+    }
+
+    const result = dotenv.config({ path: envPath });
+    if (!result.error) {
+      return envPath;
+    }
+  }
+
+  dotenv.config();
+  return null;
+}
+
+const loadedEnvPath = loadEnvironmentConfig();
+
+// Prevent EPIPE crashes when stdout/stderr are closed on Windows.
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+console.log = (...args) => { try { originalLog.apply(console, args); } catch (error) { if (error.code !== 'EPIPE') throw error; } };
+console.error = (...args) => { try { originalError.apply(console, args); } catch (error) { if (error.code !== 'EPIPE') throw error; } };
+console.warn = (...args) => { try { originalWarn.apply(console, args); } catch (error) { if (error.code !== 'EPIPE') throw error; } };
+
 const BACKEND_URL = (process.env.BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/$/, '');
+const API_KEY = process.env.API_KEY || '';
+const ADMIN_USER = process.env.ADMIN_USER || '';
+const ADMIN_PASS = process.env.ADMIN_PASS || '';
 
 let mainWindow;
 let tray;
@@ -51,13 +88,40 @@ function safeError(...args) {
   }
 }
 
-async function apiRequest(endpoint, options = {}) {
-  const headers = {};
-  // Ajouter la clé API si configurée
-  const apiKeyValue = process.env.API_KEY;
-  if (apiKeyValue) {
-    headers['X-API-Key'] = apiKeyValue;
+if (loadedEnvPath) {
+  safeLog('Configuration chargee depuis:', loadedEnvPath);
+} else {
+  safeWarn('Aucun fichier .env trouve, utilisation des variables deja presentes.');
+}
+
+safeLog('Backend cible:', BACKEND_URL);
+
+function safeWarn(...args) {
+  try {
+    writeToStream(process.stderr, args);
+  } catch (error) {
+    if (error && error.code !== 'EPIPE') {
+      throw error;
+    }
   }
+}
+
+function buildAuthHeaders() {
+  if (API_KEY) {
+    return { 'X-API-Key': API_KEY };
+  }
+
+  if (ADMIN_USER && ADMIN_PASS) {
+    const token = Buffer.from(`${ADMIN_USER}:${ADMIN_PASS}`).toString('base64');
+    return { Authorization: `Basic ${token}` };
+  }
+
+  return {};
+}
+
+async function apiRequest(endpoint, options = {}) {
+  const headers = buildAuthHeaders();
+
   const requestOptions = {
     method: options.method || 'GET',
     headers
@@ -97,7 +161,12 @@ function connectToBackend() {
     socket = null;
   }
 
-  socket = io(BACKEND_URL);
+  const authHeaders = buildAuthHeaders();
+  const socketOptions = Object.keys(authHeaders).length > 0
+    ? { extraHeaders: authHeaders }
+    : undefined;
+
+  socket = io(BACKEND_URL, socketOptions);
 
   socket.on('connect', () => {
     safeLog('Connecte au serveur backend');
@@ -111,6 +180,11 @@ function connectToBackend() {
         sendToRenderer('backend-connected');
       }
     }
+  });
+
+  socket.on('connect_error', (error) => {
+    safeError('Connexion Socket.IO impossible:', error.message);
+    sendToRenderer('backend-disconnected');
   });
 
   socket.on('new-reservation', (reservation) => {
@@ -219,7 +293,9 @@ app.on('activate', () => {
 });
 
 ipcMain.handle('get-config', async () => ({
-  backendUrl: BACKEND_URL
+  backendUrl: BACKEND_URL,
+  hasApiKey: Boolean(API_KEY),
+  hasCredentials: Boolean(API_KEY || (ADMIN_USER && ADMIN_PASS))
 }));
 
 ipcMain.handle('get-reservations', async (_event, filters = {}) => {

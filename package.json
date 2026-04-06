@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "nodemon backend/server.js",
     "start": "node backend/server.js",
-    "desktop": "env -u ELECTRON_RUN_AS_NODE electron desktop/main.js",
+    "desktop": "node desktop/start-electron.js",
     "test": "jest",
     "build-win": "electron-builder --win",
     "dist": "electron-builder"
@@ -39,12 +39,20 @@
       "output": "dist"
     },
     "files": [
+      ".env.example",
       "desktop/**/*",
       "assets/**/*",
       "node_modules/**/*"
     ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      }
+    ],
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,

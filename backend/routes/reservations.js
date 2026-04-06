@@ -1,46 +1,135 @@
 const express = require('express');
+
 const router = express.Router();
 const Reservation = require('../models/Reservation');
 const { sendNotifications } = require('../services/notificationService');
-const { checkAvailability, CAPACITY } = require('../services/capacityService');
+const {
+  checkAvailability,
+  CAPACITY,
+  getServiceBounds,
+  getRestaurantNow,
+  parseDateInput,
+  timeToMinutes
+} = require('../services/capacityService');
 const { apiKey } = require('../middleware/auth');
 
-// Créer une réservation depuis l'application desktop (protégé par API key)
+const ONLINE_BOOKING_LIMIT = 8;
+const ONLINE_CAPACITY_LIMIT = 50;
+const RESTAURANT_PHONE_DISPLAY = process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19';
+
+function getDayRange(date) {
+  const { year, month, day } = parseDateInput(date);
+
+  return {
+    startDate: new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0)),
+    endDate: new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0, 0))
+  };
+}
+
+function getPartySize(numberOfPeople) {
+  const parsed = parseInt(numberOfPeople, 10);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error('Nombre de couverts invalide');
+  }
+
+  return parsed;
+}
+
+function getServiceName(timeInMinutes) {
+  return timeInMinutes < (15 * 60) ? 'midi' : 'soir';
+}
+
+function buildServiceHoursMessage(bounds) {
+  const midiLimit = bounds.isWeekend ? '13h45' : '13h15';
+  const soirLimit = bounds.isWeekend ? '21h30' : '21h00';
+
+  return `Les reservations sont possibles de 12h00 a ${midiLimit} (midi) ou de 18h30 a ${soirLimit} (soir)`;
+}
+
+function validatePublicReservationPayload(payload) {
+  const normalizedDate = typeof payload.date === 'string' ? payload.date : '';
+  parseDateInput(normalizedDate);
+
+  const requestedPeople = getPartySize(payload.numberOfPeople);
+  const timeInMinutes = timeToMinutes(payload.time);
+  const bounds = getServiceBounds(normalizedDate);
+  const isMidi = timeInMinutes >= bounds.midiStart && timeInMinutes <= bounds.midiEnd;
+  const isSoir = timeInMinutes >= bounds.soirStart && timeInMinutes <= bounds.soirEnd;
+  const restaurantNow = getRestaurantNow();
+
+  if (normalizedDate < restaurantNow.date) {
+    throw new Error('Cette date est deja passee. Veuillez choisir une date ulterieure.');
+  }
+
+  if (requestedPeople > ONLINE_BOOKING_LIMIT) {
+    throw new Error(`Pour les groupes de plus de ${ONLINE_BOOKING_LIMIT} personnes, merci d'appeler le restaurant au ${RESTAURANT_PHONE_DISPLAY}.`);
+  }
+
+  if (!isMidi && !isSoir) {
+    throw new Error(buildServiceHoursMessage(bounds));
+  }
+
+  if (normalizedDate === restaurantNow.date) {
+    if (isMidi && restaurantNow.minutes > 900) {
+      throw new Error('Le service du midi est termine pour aujourd\'hui. Veuillez choisir le service du soir ou un autre jour.');
+    }
+
+    if (isSoir && restaurantNow.minutes > 1380) {
+      throw new Error('Le service du soir est termine pour aujourd\'hui. Veuillez choisir un autre jour.');
+    }
+
+    if (timeInMinutes < restaurantNow.minutes) {
+      throw new Error('Cette heure est deja passee. Veuillez choisir un creneau ulterieur.');
+    }
+  }
+
+  return {
+    normalizedDate,
+    requestedPeople,
+    timeInMinutes,
+    isMidi,
+    isSoir
+  };
+}
+
+async function createReservation(req, res) {
+  const reservation = new Reservation(req.body);
+  await reservation.save();
+
+  try {
+    await sendNotifications(reservation);
+    console.log('Notifications envoyees avec succes');
+  } catch (notificationError) {
+    console.error('Erreur envoi notifications:', notificationError);
+  }
+
+  const io = req.app.get('io');
+  console.log('Emission de new-reservation via Socket.IO pour:', reservation.customerName);
+  io.emit('new-reservation', reservation);
+
+  return reservation;
+}
+
 router.post('/desktop', apiKey, async (req, res) => {
   try {
     const { date, time, numberOfPeople } = req.body;
+    const requestedPeople = getPartySize(numberOfPeople);
+    const availability = await checkAvailability(date, time, requestedPeople, CAPACITY);
 
-    // Vérifier la capacité par créneau (desktop = capacité totale restaurant)
-    const availability = await checkAvailability(date, time, numberOfPeople, CAPACITY);
     if (!availability.available) {
-      const hour = parseInt(time.split(':')[0]);
-      const serviceName = hour < 15 ? 'midi' : 'soir';
+      const serviceName = getServiceName(timeToMinutes(time));
       return res.status(400).json({
         success: false,
-        message: `Désolé, le service du ${serviceName} est complet à ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts).`
+        message: `Desole, le service du ${serviceName} est complet a ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts).`
       });
     }
 
-    const reservation = new Reservation(req.body);
-    await reservation.save();
-    
-    // Envoyer les notifications email/SMS d'abord (important pour le client)
-    try {
-      await sendNotifications(reservation);
-      console.log('Notifications envoyées avec succès');
-    } catch (err) {
-      console.error('Erreur envoi notifications:', err);
-      // L'erreur n'empêche pas la réservation d'être créée
-    }
-    
-    // Notifier l'application desktop via WebSocket après
-    const io = req.app.get('io');
-    console.log('Émission de new-reservation via Socket.IO pour:', reservation.customerName);
-    io.emit('new-reservation', reservation);
-    
+    const reservation = await createReservation(req, res);
+
     res.status(201).json({
       success: true,
-      message: 'Réservation créée avec succès',
+      message: 'Reservation creee avec succes',
       data: reservation
     });
   } catch (error) {
@@ -51,108 +140,25 @@ router.post('/desktop', apiKey, async (req, res) => {
   }
 });
 
-// Créer une nouvelle réservation (depuis le site web - limite 50 couverts)
 router.post('/', async (req, res) => {
   try {
-    // Vérifier la limite de 50 couverts par service
-    const { date, time, numberOfPeople } = req.body;
-    const hour = parseInt(time.split(':')[0]);
-    
-    // Déterminer le service et vérifier les horaires limites
-    const [hours, minutes] = time.split(':').map(Number);
-    const timeInMinutes = hours * 60 + minutes;
-    
-    // Vérifier si c'est le week-end (samedi = 6, dimanche = 0)
-    const reservationDate = new Date(date);
-    const dayOfWeek = reservationDate.getDay();
-    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-    
-    // Vérifier si c'est aujourd'hui et si le service est déjà passé
-    const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    reservationDate.setHours(0, 0, 0, 0);
-    
-    if (reservationDate.getTime() === today.getTime()) {
-      // C'est aujourd'hui, vérifier l'heure actuelle
-      const currentHour = now.getHours();
-      const currentMinutes = now.getMinutes();
-      const currentTimeInMinutes = currentHour * 60 + currentMinutes;
-      
-      // Si on est après 15h, le service du midi est terminé
-      if (timeInMinutes < 900 && currentTimeInMinutes > 900) { // 900 = 15h00
-        return res.status(400).json({
-          success: false,
-          message: 'Le service du midi est terminé pour aujourd\'hui. Veuillez choisir le service du soir ou un autre jour.'
-        });
-      }
-      
-      // Si on est après 23h, le service du soir est terminé
-      if (timeInMinutes >= 1110 && currentTimeInMinutes > 1380) { // 1380 = 23h00
-        return res.status(400).json({
-          success: false,
-          message: 'Le service du soir est terminé pour aujourd\'hui. Veuillez choisir un autre jour.'
-        });
-      }
-      
-      // Empêcher de réserver pour une heure déjà passée
-      if (timeInMinutes < currentTimeInMinutes) {
-        return res.status(400).json({
-          success: false,
-          message: 'Cette heure est déjà passée. Veuillez choisir un créneau ultérieur.'
-        });
-      }
-    }
-    
-    // Horaires avec 30 min supplémentaires le week-end
-    // Midi: 12h00 à 13h15 (13h45 le week-end)
-    const midiMaxTime = isWeekend ? 825 : 795; // 13h45 = 825 min, 13h15 = 795 min
-    const isMidi = timeInMinutes >= 720 && timeInMinutes <= midiMaxTime;
-    
-    // Soir: 18h30 à 21h00 (21h30 le week-end)
-    const soirMaxTime = isWeekend ? 1290 : 1260; // 21h30 = 1290 min, 21h00 = 1260 min
-    const isSoir = timeInMinutes >= 1110 && timeInMinutes <= soirMaxTime;
-    
-    if (!isMidi && !isSoir) {
-      const midiLimit = isWeekend ? '13h45' : '13h15';
-      const soirLimit = isWeekend ? '21h30' : '21h00';
-      return res.status(400).json({
-        success: false,
-        message: `Les réservations sont possibles de 12h00 à ${midiLimit} (midi) ou de 18h30 à ${soirLimit} (soir)`
-      });
-    }
-    
-    // Vérifier la capacité par créneau (web = limite 50 pour garder de la marge)
-    const WEB_LIMIT = 50;
-    const availability = await checkAvailability(date, time, numberOfPeople, WEB_LIMIT);
+    const { date, time } = req.body;
+    const validation = validatePublicReservationPayload(req.body);
+    const availability = await checkAvailability(date, time, validation.requestedPeople, ONLINE_CAPACITY_LIMIT);
+
     if (!availability.available) {
-      const serviceName = isMidi ? 'midi' : 'soir';
+      const serviceName = validation.isMidi ? 'midi' : 'soir';
       return res.status(400).json({
         success: false,
-        message: `Désolé, les réservations en ligne pour le service du ${serviceName} sont complètes à ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts). Vous pouvez essayer de venir directement au restaurant ou choisir un autre créneau.`
+        message: `Desole, les reservations en ligne pour le service du ${serviceName} sont completes a ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts). Vous pouvez essayer de venir directement au restaurant ou choisir un autre creneau.`
       });
     }
-    
-    const reservation = new Reservation(req.body);
-    await reservation.save();
-    
-    // Envoyer les notifications email/SMS d'abord (important pour le client)
-    try {
-      await sendNotifications(reservation);
-      console.log('Notifications envoyées avec succès');
-    } catch (err) {
-      console.error('Erreur envoi notifications:', err);
-      // L'erreur n'empêche pas la réservation d'être créée
-    }
-    
-    // Notifier l'application desktop via WebSocket après
-    const io = req.app.get('io');
-    console.log('Émission de new-reservation via Socket.IO pour:', reservation.customerName);
-    io.emit('new-reservation', reservation);
-    
+
+    const reservation = await createReservation(req, res);
+
     res.status(201).json({
       success: true,
-      message: 'Réservation créée avec succès',
+      message: 'Reservation creee avec succes',
       data: reservation
     });
   } catch (error) {
@@ -163,62 +169,80 @@ router.post('/', async (req, res) => {
   }
 });
 
-// Vérifier la disponibilité par créneau pour une date
 router.get('/availability', async (req, res) => {
   try {
     const { date, people } = req.query;
+
     if (!date) {
-      return res.status(400).json({ success: false, message: 'Paramètre date requis' });
+      return res.status(400).json({
+        success: false,
+        message: 'Parametre date requis'
+      });
     }
+
     const { getAvailableSlots } = require('../services/capacityService');
-    const numberOfPeople = parseInt(people) || 2;
-    const slots = await getAvailableSlots(date, numberOfPeople, 50);
-    res.json({ success: true, data: slots });
+    const requestedPeople = getPartySize(people || 2);
+
+    if (requestedPeople > ONLINE_BOOKING_LIMIT) {
+      return res.status(400).json({
+        success: false,
+        message: `Pour les groupes de plus de ${ONLINE_BOOKING_LIMIT} personnes, merci d'appeler le restaurant au ${RESTAURANT_PHONE_DISPLAY}.`
+      });
+    }
+
+    const slots = await getAvailableSlots(date, requestedPeople, ONLINE_CAPACITY_LIMIT);
+
+    res.json({
+      success: true,
+      data: slots
+    });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(400).json({
+      success: false,
+      message: error.message
+    });
   }
 });
 
-// Obtenir toutes les réservations (protégé)
 router.get('/', apiKey, async (req, res) => {
   try {
     const { date, status } = req.query;
-    let query = {};
-    
+    const query = {};
+
     if (date) {
-      const startDate = new Date(date);
-      const endDate = new Date(date);
-      endDate.setDate(endDate.getDate() + 1);
+      const { startDate, endDate } = getDayRange(date);
       query.date = { $gte: startDate, $lt: endDate };
     }
-    
+
     if (status) {
       query.status = status;
     }
-    
+
     const reservations = await Reservation.find(query).sort({ date: 1, time: 1 });
+
     res.json({
       success: true,
       data: reservations
     });
   } catch (error) {
-    res.status(500).json({
+    res.status(error.message.startsWith('Date invalide') ? 400 : 500).json({
       success: false,
       message: error.message
     });
   }
 });
 
-// Obtenir une réservation par ID
 router.get('/:id', apiKey, async (req, res) => {
   try {
     const reservation = await Reservation.findById(req.params.id);
+
     if (!reservation) {
       return res.status(404).json({
         success: false,
-        message: 'Réservation non trouvée'
+        message: 'Reservation non trouvee'
       });
     }
+
     res.json({
       success: true,
       data: reservation
@@ -231,40 +255,40 @@ router.get('/:id', apiKey, async (req, res) => {
   }
 });
 
-// Mettre à jour une réservation
 router.put('/:id', apiKey, async (req, res) => {
   try {
     const existing = await Reservation.findById(req.params.id);
+
     if (!existing) {
-      return res.status(404).json({ success: false, message: 'Réservation non trouvée' });
+      return res.status(404).json({
+        success: false,
+        message: 'Reservation non trouvee'
+      });
     }
 
-    // Empêcher la modification d'une réservation annulée ou terminée
     if (existing.status === 'cancelled' || existing.status === 'completed') {
       return res.status(400).json({
         success: false,
-        message: `Impossible de modifier une réservation ${existing.status === 'cancelled' ? 'annulée' : 'terminée'}`
+        message: `Impossible de modifier une reservation ${existing.status === 'cancelled' ? 'annulee' : 'terminee'}`
       });
     }
 
     const { date, time, numberOfPeople } = req.body;
-    const dateChanged = date && date !== existing.date.toISOString().split('T')[0];
+    const existingDate = existing.date.toISOString().split('T')[0];
+    const dateChanged = date && date !== existingDate;
     const timeChanged = time && time !== existing.time;
-    const peopleChanged = numberOfPeople && numberOfPeople !== existing.numberOfPeople;
+    const peopleChanged = typeof numberOfPeople !== 'undefined' && getPartySize(numberOfPeople) !== existing.numberOfPeople;
 
-    // Revalider la capacité si date, heure ou nombre de personnes changent
     if (dateChanged || timeChanged || peopleChanged) {
-      const checkDate = date || existing.date.toISOString().split('T')[0];
+      const checkDate = date || existingDate;
       const checkTime = time || existing.time;
-      const checkPeople = numberOfPeople || existing.numberOfPeople;
-
-      // Exclure la réservation courante du calcul de capacité
+      const checkPeople = typeof numberOfPeople !== 'undefined' ? getPartySize(numberOfPeople) : existing.numberOfPeople;
       const availability = await checkAvailability(checkDate, checkTime, checkPeople, CAPACITY, req.params.id);
 
       if (!availability.available) {
         return res.status(400).json({
           success: false,
-          message: `Créneau complet à ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts)`
+          message: `Creneau complet a ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts)`
         });
       }
     }
@@ -278,13 +302,19 @@ router.put('/:id', apiKey, async (req, res) => {
     const io = req.app.get('io');
     io.emit('update-reservation', reservation);
 
-    res.json({ success: true, message: 'Réservation mise à jour', data: reservation });
+    res.json({
+      success: true,
+      message: 'Reservation mise a jour',
+      data: reservation
+    });
   } catch (error) {
-    res.status(400).json({ success: false, message: error.message });
+    res.status(400).json({
+      success: false,
+      message: error.message
+    });
   }
 });
 
-// Annuler une réservation
 router.delete('/:id', apiKey, async (req, res) => {
   try {
     const reservation = await Reservation.findByIdAndUpdate(
@@ -292,21 +322,20 @@ router.delete('/:id', apiKey, async (req, res) => {
       { status: 'cancelled' },
       { new: true }
     );
-    
+
     if (!reservation) {
       return res.status(404).json({
         success: false,
-        message: 'Réservation non trouvée'
+        message: 'Reservation non trouvee'
       });
     }
-    
-    // Notifier l'application desktop
+
     const io = req.app.get('io');
     io.emit('cancel-reservation', reservation);
-    
+
     res.json({
       success: true,
-      message: 'Réservation annulée',
+      message: 'Reservation annulee',
       data: reservation
     });
   } catch (error) {
