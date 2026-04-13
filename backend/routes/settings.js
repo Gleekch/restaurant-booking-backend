@@ -11,7 +11,7 @@ let settings = {
   },
   hours: {
     monday: { lunch: null, dinner: null, closed: true },
-    tuesday: { lunch: '12:00-14:30', dinner: '19:00-22:30', closed: false },
+    tuesday: { lunch: null, dinner: null, closed: true },
     wednesday: { lunch: '12:00-14:30', dinner: '19:00-22:30', closed: false },
     thursday: { lunch: '12:00-14:30', dinner: '19:00-22:30', closed: false },
     friday: { lunch: '12:00-14:30', dinner: '19:00-23:00', closed: false },

@@ -58,6 +58,15 @@ function getRestaurantNow() {
   };
 }
 
+function getRestaurantDay(date) {
+  return buildUtcDate(date).getUTCDay();
+}
+
+function isOnlineBookingClosedDate(date) {
+  const day = getRestaurantDay(date);
+  return day === 1 || day === 2;
+}
+
 function timeToMinutes(timeStr) {
   if (typeof timeStr !== 'string' || !/^\d{2}:\d{2}$/.test(timeStr)) {
     throw new Error('Heure invalide. Format attendu : HH:MM');
@@ -146,7 +155,7 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
 }
 
 function getServiceBounds(date) {
-  const day = buildUtcDate(date).getUTCDay();
+  const day = getRestaurantDay(date);
   const isWeekend = day === 0 || day === 6;
 
   return {
@@ -214,6 +223,7 @@ module.exports = {
   getAvailableSlots,
   getOccupancyMap,
   getServiceBounds,
+  isOnlineBookingClosedDate,
   parseDateInput,
   timeToMinutes,
   getRestaurantNow,

@@ -8,6 +8,7 @@ const {
   CAPACITY,
   getServiceBounds,
   getRestaurantNow,
+  isOnlineBookingClosedDate,
   parseDateInput,
   timeToMinutes
 } = require('../services/capacityService');
@@ -47,6 +48,10 @@ function buildServiceHoursMessage(bounds) {
   return `Les reservations sont possibles de 12h00 a ${midiLimit} (midi) ou de 18h30 a ${soirLimit} (soir)`;
 }
 
+function buildClosedDaysMessage() {
+  return 'Les reservations en ligne ne sont pas disponibles le lundi et le mardi. Merci de choisir un autre jour.';
+}
+
 function validatePublicReservationPayload(payload) {
   const normalizedDate = typeof payload.date === 'string' ? payload.date : '';
   parseDateInput(normalizedDate);
@@ -60,6 +65,10 @@ function validatePublicReservationPayload(payload) {
 
   if (normalizedDate < restaurantNow.date) {
     throw new Error('Cette date est deja passee. Veuillez choisir une date ulterieure.');
+  }
+
+  if (isOnlineBookingClosedDate(normalizedDate)) {
+    throw new Error(buildClosedDaysMessage());
   }
 
   if (requestedPeople > ONLINE_BOOKING_LIMIT) {
@@ -182,6 +191,13 @@ router.get('/availability', async (req, res) => {
 
     const { getAvailableSlots } = require('../services/capacityService');
     const requestedPeople = getPartySize(people || 2);
+
+    if (isOnlineBookingClosedDate(date)) {
+      return res.status(400).json({
+        success: false,
+        message: buildClosedDaysMessage()
+      });
+    }
 
     if (requestedPeople > ONLINE_BOOKING_LIMIT) {
       return res.status(400).json({
