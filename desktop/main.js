@@ -16,10 +16,12 @@ function getCandidateEnvPaths() {
 
   if (process.resourcesPath) {
     candidates.push(path.join(process.resourcesPath, '.env'));
+    candidates.push(path.join(process.resourcesPath, '..', '.env'));
   }
 
   if (process.execPath) {
     candidates.push(path.join(path.dirname(process.execPath), '.env'));
+    candidates.push(path.join(path.dirname(process.execPath), 'resources', '.env'));
   }
 
   return [...new Set(candidates)];
@@ -107,12 +109,15 @@ function safeWarn(...args) {
 }
 
 function buildAuthHeaders() {
-  if (API_KEY) {
-    return { 'X-API-Key': API_KEY };
+  const key = process.env.API_KEY || API_KEY;
+  if (key) {
+    return { 'X-API-Key': key };
   }
 
-  if (ADMIN_USER && ADMIN_PASS) {
-    const token = Buffer.from(`${ADMIN_USER}:${ADMIN_PASS}`).toString('base64');
+  const user = process.env.ADMIN_USER || ADMIN_USER;
+  const pass = process.env.ADMIN_PASS || ADMIN_PASS;
+  if (user && pass) {
+    const token = Buffer.from(`${user}:${pass}`).toString('base64');
     return { Authorization: `Basic ${token}` };
   }
 
