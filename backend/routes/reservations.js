@@ -18,6 +18,7 @@ const { apiKey } = require('../middleware/auth');
 const ONLINE_BOOKING_LIMIT = 8;
 const ONLINE_CAPACITY_LIMIT = parseInt(process.env.ONLINE_CAPACITY, 10) || 50;
 const RESTAURANT_PHONE_DISPLAY = process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19';
+const ONLINE_LIMIT_NOTICE = `Pour garantir un accueil soigné à chaque table et le bien-être de notre équipe, nous limitons les réservations en ligne. Pour toute demande, appelez-nous au ${process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19'}.`;
 
 function getDayRange(date) {
   const { year, month, day } = parseDateInput(date);
@@ -164,7 +165,7 @@ router.post('/', async (req, res) => {
       const serviceName = validation.isMidi ? 'midi' : 'soir';
       return res.status(400).json({
         success: false,
-        message: `Desole, les reservations en ligne pour le service du ${serviceName} sont completes a ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts). Vous pouvez essayer de venir directement au restaurant ou choisir un autre creneau.`
+        message: `Ce créneau est complet en ligne pour le service du ${serviceName}. Afin de garantir un accueil soigné à chaque table et le bien-être de notre équipe, nous limitons le nombre de réservations en ligne. Vous pouvez choisir un autre créneau ou nous appeler au ${RESTAURANT_PHONE_DISPLAY} — il reste peut-être de la place !`
       });
     }
 
@@ -214,18 +215,22 @@ router.get('/availability', async (req, res) => {
 
     const baseSlots = await getAvailableSlots(date, requestedPeople, ONLINE_CAPACITY_LIMIT);
 
+    const hasFullSlots = [...baseSlots.midi, ...baseSlots.soir].some(s => !s.available);
+    const notice = hasFullSlots ? ONLINE_LIMIT_NOTICE : null;
+
     if (!getConfig().recommendationsEnabled) {
       return res.json({
         success: true,
         data: {
           ...baseSlots,
-          meta: { recommendationsEnabled: false }
+          meta: { recommendationsEnabled: false, notice }
         }
       });
     }
 
     try {
       const enriched = await getEnrichedAvailability(date, requestedPeople, baseSlots);
+      enriched.meta = { ...enriched.meta, notice };
       return res.json({ success: true, data: enriched });
     } catch (enrichError) {
       console.error('slotStrategyService fallback:', enrichError.message);
@@ -233,7 +238,7 @@ router.get('/availability', async (req, res) => {
         success: true,
         data: {
           ...baseSlots,
-          meta: { recommendationsEnabled: false }
+          meta: { recommendationsEnabled: false, notice }
         }
       });
     }
