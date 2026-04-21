@@ -16,7 +16,7 @@ const {
 const { apiKey } = require('../middleware/auth');
 
 const ONLINE_BOOKING_LIMIT = 8;
-const ONLINE_CAPACITY_LIMIT = 50;
+const ONLINE_CAPACITY_LIMIT = parseInt(process.env.ONLINE_CAPACITY, 10) || 50;
 const RESTAURANT_PHONE_DISPLAY = process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19';
 
 function getDayRange(date) {

@@ -9,7 +9,8 @@ const {
   getOccupancyMap,
   getServiceBounds,
   timeToMinutes,
-  CAPACITY
+  CAPACITY,
+  SLOT_MAX_COVERS
 } = require('./capacityService');
 
 const MIDI_DURATION = parseInt(process.env.MIDI_DURATION_MIN, 10) || 90;
@@ -96,7 +97,7 @@ function pickRecommendedIndex(slots, service) {
   return best;
 }
 
-function enrichSlots(baseSlots, service, bounds, occupancy, requestedPeople, capacity) {
+function enrichSlots(baseSlots, service, bounds, occupancy, arrivals, requestedPeople, capacity) {
   const duration = service === 'midi' ? MIDI_DURATION : SOIR_DURATION;
 
   // First pass: compute scores
@@ -105,7 +106,8 @@ function enrichSlots(baseSlots, service, bounds, occupancy, requestedPeople, cap
     const peakLoad = computePeakLoad(timeMin, duration, occupancy, requestedPeople);
     const score = computeScore(peakLoad, capacity);
     const wave = getWave(timeMin, bounds);
-    return { ...slot, wave, score, _timeMin: timeMin, _peakLoad: peakLoad };
+    const slotArrivals = (arrivals[timeMin] || 0) + requestedPeople;
+    return { ...slot, wave, score, _timeMin: timeMin, _peakLoad: peakLoad, _slotArrivals: slotArrivals };
   });
 
   const recommendedIdx = pickRecommendedIndex(scored, service);
@@ -117,7 +119,7 @@ function enrichSlots(baseSlots, service, bounds, occupancy, requestedPeople, cap
       status = 'full';
     } else if (idx === recommendedIdx) {
       status = 'recommended';
-    } else if (slot._peakLoad / capacity > 0.72) {
+    } else if (slot._slotArrivals >= SLOT_MAX_COVERS) {
       status = 'last-spots';
     } else {
       status = 'available';
@@ -138,7 +140,7 @@ function enrichSlots(baseSlots, service, bounds, occupancy, requestedPeople, cap
           .map(s => s.time)
       : [];
 
-    const { _timeMin, _peakLoad, ...rest } = slot;
+    const { _timeMin, _peakLoad, _slotArrivals, ...rest } = slot;
     return { ...rest, alternatives };
   });
 }
@@ -149,12 +151,12 @@ function enrichSlots(baseSlots, service, bounds, occupancy, requestedPeople, cap
  * En cas d'erreur interne, rejette la promesse — l'appelant doit gérer le fallback.
  */
 async function getEnrichedAvailability(date, numberOfPeople, baseData) {
-  const { occupancy } = await getOccupancyMap(date);
+  const { occupancy, arrivals } = await getOccupancyMap(date);
   const bounds = getServiceBounds(date);
   const capacity = baseData.capacity;
 
-  const enrichedMidi = enrichSlots(baseData.midi, 'midi', bounds, occupancy, numberOfPeople, capacity);
-  const enrichedSoir = enrichSlots(baseData.soir, 'soir', bounds, occupancy, numberOfPeople, capacity);
+  const enrichedMidi = enrichSlots(baseData.midi, 'midi', bounds, occupancy, arrivals, numberOfPeople, capacity);
+  const enrichedSoir = enrichSlots(baseData.soir, 'soir', bounds, occupancy, arrivals, numberOfPeople, capacity);
 
   return {
     midi: enrichedMidi,

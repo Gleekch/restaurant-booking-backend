@@ -12,6 +12,9 @@ const RESTAURANT_TIME_ZONE = process.env.RESTAURANT_TIME_ZONE || 'Indian/Reunion
 const CAPACITY = parseInt(process.env.RESTAURANT_CAPACITY, 10) || 70;
 const MIDI_DURATION = parseInt(process.env.MIDI_DURATION_MIN, 10) || 90;
 const SOIR_DURATION = parseInt(process.env.SOIR_DURATION_MIN, 10) || 120;
+const SLOT_MAX_COVERS = parseInt(process.env.SLOT_MAX_COVERS, 10) || 15;
+const SLOT_TOLERANCE = parseInt(process.env.SLOT_TOLERANCE, 10) || 2;
+const SLOT_HARD_LIMIT = SLOT_MAX_COVERS + SLOT_TOLERANCE;
 
 function parseDateInput(date) {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -118,18 +121,21 @@ async function getOccupancyMap(date, excludeId) {
 
   const reservations = await Reservation.find(query);
   const occupancy = {};
+  const arrivals = {};
 
   for (const reservation of reservations) {
     const startMin = timeToMinutes(reservation.time);
     const duration = getMealDuration(startMin);
     const endMin = startMin + duration;
 
+    arrivals[startMin] = (arrivals[startMin] || 0) + reservation.numberOfPeople;
+
     for (let slot = startMin; slot < endMin; slot += 15) {
       occupancy[slot] = (occupancy[slot] || 0) + reservation.numberOfPeople;
     }
   }
 
-  return { occupancy, reservations };
+  return { occupancy, arrivals, reservations };
 }
 
 async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
@@ -140,12 +146,25 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
   }
 
   const effectiveLimit = Math.min(limit || CAPACITY, CAPACITY);
-  const { occupancy } = await getOccupancyMap(date, excludeId);
-
+  const { occupancy, arrivals } = await getOccupancyMap(date, excludeId);
   const startMin = timeToMinutes(time);
+
+  // Vérification 1 : limite d'arrivées par créneau de 15 min
+  const slotArrivals = (arrivals[startMin] || 0) + requestedPeople;
+  if (slotArrivals > SLOT_HARD_LIMIT) {
+    const h = String(Math.floor(startMin / 60)).padStart(2, '0');
+    const m = String(startMin % 60).padStart(2, '0');
+    return {
+      available: false,
+      peakOccupancy: slotArrivals,
+      peakSlot: `${h}:${m}`,
+      capacity: SLOT_HARD_LIMIT
+    };
+  }
+
+  // Vérification 2 : capacité salle globale sur la durée du repas
   const duration = getMealDuration(startMin);
   const endMin = startMin + duration;
-
   let peakOccupancy = 0;
   let peakSlot = startMin;
 
@@ -184,7 +203,7 @@ function getServiceBounds(date) {
 async function getAvailableSlots(date, numberOfPeople, limit) {
   const requestedPeople = parseInt(numberOfPeople, 10) || 2;
   const effectiveLimit = Math.min(limit || CAPACITY, CAPACITY);
-  const { occupancy } = await getOccupancyMap(date);
+  const { occupancy, arrivals } = await getOccupancyMap(date);
   const bounds = getServiceBounds(date);
   const restaurantNow = getRestaurantNow();
   const isToday = date === restaurantNow.date;
@@ -196,6 +215,10 @@ async function getAvailableSlots(date, numberOfPeople, limit) {
 
   function checkSlot(startMin, duration) {
     if (isToday && startMin < currentMinutes) {
+      return false;
+    }
+
+    if ((arrivals[startMin] || 0) + requestedPeople > SLOT_HARD_LIMIT) {
       return false;
     }
 
@@ -244,5 +267,7 @@ module.exports = {
   parseDateInput,
   timeToMinutes,
   getRestaurantNow,
-  CAPACITY
+  CAPACITY,
+  SLOT_MAX_COVERS,
+  SLOT_HARD_LIMIT
 };
