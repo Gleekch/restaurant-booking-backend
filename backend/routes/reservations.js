@@ -195,6 +195,7 @@ router.get('/availability', async (req, res) => {
     }
 
     const { getAvailableSlots } = require('../services/capacityService');
+    const { getEnrichedAvailability, getConfig } = require('../services/slotStrategyService');
     const requestedPeople = getPartySize(people || 2);
 
     if (isOnlineBookingClosedDate(date)) {
@@ -211,12 +212,31 @@ router.get('/availability', async (req, res) => {
       });
     }
 
-    const slots = await getAvailableSlots(date, requestedPeople, ONLINE_CAPACITY_LIMIT);
+    const baseSlots = await getAvailableSlots(date, requestedPeople, ONLINE_CAPACITY_LIMIT);
 
-    res.json({
-      success: true,
-      data: slots
-    });
+    if (!getConfig().recommendationsEnabled) {
+      return res.json({
+        success: true,
+        data: {
+          ...baseSlots,
+          meta: { recommendationsEnabled: false }
+        }
+      });
+    }
+
+    try {
+      const enriched = await getEnrichedAvailability(date, requestedPeople, baseSlots);
+      return res.json({ success: true, data: enriched });
+    } catch (enrichError) {
+      console.error('slotStrategyService fallback:', enrichError.message);
+      return res.json({
+        success: true,
+        data: {
+          ...baseSlots,
+          meta: { recommendationsEnabled: false }
+        }
+      });
+    }
   } catch (error) {
     res.status(400).json({
       success: false,
