@@ -341,3 +341,7 @@ ipcMain.handle('cancel-reservation', async (_event, id) => {
     body: { status: 'cancelled' }
   });
 });
+
+ipcMain.handle('get-availability', async (_event, { date, people = 2 }) => {
+  return apiRequest(`/api/reservations/availability?date=${date}&people=${people}`);
+});

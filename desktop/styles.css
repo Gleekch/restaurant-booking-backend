@@ -387,6 +387,48 @@ body {
 .progress-fill.warning { background: var(--warning); }
 .progress-fill.danger { background: var(--danger); }
 
+.wave-breakdown {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wave-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 8px;
+    row-gap: 2px;
+}
+
+.wave-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.wave-covers {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    text-align: right;
+}
+
+.wave-track {
+    grid-column: 1 / -1;
+    margin-top: 0;
+    height: 2px;
+}
+
+.wave-recommended {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-height: 16px;
+}
+
 /* ─── Reservation rows & cards ─── */
 .reservations-grid {
     display: grid;

@@ -12,7 +12,11 @@ let currentView = 'today';
 let currentServiceFilter = 'all';
 let serviceDetailState = null;
 let editingReservationId = null;
-let notifiedReservations = new Set(); // Pour éviter les notifications en double
+let notifiedReservations = new Set();
+
+// Cutoffs de vague (doivent correspondre à slotStrategyService côté backend)
+const MIDI_WAVE1_CUTOFF = '12:30';
+const SOIR_WAVE1_CUTOFF = '19:15';
 
 // Éléments DOM
 const connectionStatus = document.getElementById('connection-status');
@@ -92,6 +96,59 @@ function getLoadClass(totalCovers, limit = 50) {
     }
 
     return '';
+}
+
+function getWaveSummary(serviceReservations, service) {
+    const cutoff = service === 'midi' ? MIDI_WAVE1_CUTOFF : SOIR_WAVE1_CUTOFF;
+    const active = serviceReservations.filter(isActiveReservation);
+    const wave1 = active.filter(r => r.time < cutoff);
+    const wave2 = active.filter(r => r.time >= cutoff);
+    return {
+        wave1: { count: wave1.length, covers: wave1.reduce((s, r) => s + r.numberOfPeople, 0) },
+        wave2: { count: wave2.length, covers: wave2.reduce((s, r) => s + r.numberOfPeople, 0) }
+    };
+}
+
+function renderWaveBreakdown(waveSummary, service) {
+    const labels = service === 'midi'
+        ? { v1: 'Vague 1  12h–12h30', v2: 'Vague 2  12h30–13h15' }
+        : { v1: 'Vague 1  18h30–19h15', v2: 'Vague 2  19h15–21h00' };
+    const limit = 25;
+    return `
+        <div class="wave-breakdown">
+            <div class="wave-row">
+                <span class="wave-label">${labels.v1}</span>
+                <span class="wave-covers">${waveSummary.wave1.covers} cvts</span>
+                <div class="progress-track wave-track">
+                    <div class="progress-fill ${getLoadClass(waveSummary.wave1.covers, limit)}" style="width:${Math.min((waveSummary.wave1.covers / limit) * 100, 100)}%;"></div>
+                </div>
+            </div>
+            <div class="wave-row">
+                <span class="wave-label">${labels.v2}</span>
+                <span class="wave-covers">${waveSummary.wave2.covers} cvts</span>
+                <div class="progress-track wave-track">
+                    <div class="progress-fill ${getLoadClass(waveSummary.wave2.covers, limit)}" style="width:${Math.min((waveSummary.wave2.covers / limit) * 100, 100)}%;"></div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+async function updateRecommendedHours(selectedDate) {
+    try {
+        const data = await api.getAvailability(selectedDate, 2);
+        if (!data?.success || !data.data?.meta?.recommendationsEnabled) return;
+        const midiRec = (data.data.midi || []).find(s => s.status === 'recommended');
+        const soirRec = (data.data.soir || []).find(s => s.status === 'recommended');
+        if (midiRec) {
+            const el = document.getElementById('wave-recommended-midi');
+            if (el) el.textContent = `Horaire conseillé : ${midiRec.time}`;
+        }
+        if (soirRec) {
+            const el = document.getElementById('wave-recommended-soir');
+            if (el) el.textContent = `Horaire conseillé : ${soirRec.time}`;
+        }
+    } catch (_) { /* silently ignore if API unavailable */ }
 }
 
 function getSelectedDateValue() {
@@ -1088,6 +1145,8 @@ function renderOperationalDayView() {
     const soirReservations = dayReservations.filter(r => getReservationService(r) === 'soir');
     const midiSummary = getServiceSummary(midiReservations);
     const soirSummary = getServiceSummary(soirReservations);
+    const midiWaves = getWaveSummary(midiReservations, 'midi');
+    const soirWaves = getWaveSummary(soirReservations, 'soir');
     const showMidi = currentServiceFilter === 'all' || currentServiceFilter === 'midi';
     const showSoir = currentServiceFilter === 'all' || currentServiceFilter === 'soir';
 
@@ -1108,6 +1167,8 @@ function renderOperationalDayView() {
                     <div class="progress-track">
                         <div class="progress-fill ${getLoadClass(midiSummary.totalCovers)}" style="width: ${Math.min((midiSummary.totalCovers / 50) * 100, 100)}%;"></div>
                     </div>
+                    ${renderWaveBreakdown(midiWaves, 'midi')}
+                    <div class="wave-recommended" id="wave-recommended-midi"></div>
                 </div>
             ` : ''}
             ${showSoir ? `
@@ -1119,12 +1180,16 @@ function renderOperationalDayView() {
                     <div class="progress-track">
                         <div class="progress-fill ${getLoadClass(soirSummary.totalCovers)}" style="width: ${Math.min((soirSummary.totalCovers / 50) * 100, 100)}%;"></div>
                     </div>
+                    ${renderWaveBreakdown(soirWaves, 'soir')}
+                    <div class="wave-recommended" id="wave-recommended-soir"></div>
                 </div>
             ` : ''}
         </div>
         ${showMidi ? `<h3 style="margin-bottom: 10px;">☀️ Midi - ${midiSummary.totalReservations} réservations</h3><div class="reservations-subgrid" id="today-midi-grid"></div>` : ''}
         ${showSoir ? `<h3 style="margin-bottom: 10px;">🌙 Soir - ${soirSummary.totalReservations} réservations</h3><div class="reservations-subgrid" id="today-soir-grid"></div>` : ''}
     `;
+
+    updateRecommendedHours(selectedDate);
 
     if (showMidi) {
         const midiGrid = document.getElementById('today-midi-grid');

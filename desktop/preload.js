@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('api', {
   updateReservation: (id, data) => ipcRenderer.invoke('update-reservation', { id, data }),
   confirmReservation: (id) => ipcRenderer.invoke('confirm-reservation', id),
   cancelReservation: (id) => ipcRenderer.invoke('cancel-reservation', id),
+  getAvailability: (date, people = 2) => ipcRenderer.invoke('get-availability', { date, people }),
   onReservationEvent: (eventName, callback) => {
     if (!reservationEvents.has(eventName)) {
       throw new Error(`Unsupported reservation event: ${eventName}`);
