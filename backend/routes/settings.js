@@ -71,8 +71,19 @@ router.post('/availability', async (req, res) => {
   if (!date || !time) {
     return res.json({ success: false, available: false, message: 'Date et heure requises' });
   }
-  const { checkAvailability, getServiceBounds } = require('../services/capacityService');
+  const {
+    checkAvailability,
+    getServiceBounds,
+    isOnlineBookingClosedTime
+  } = require('../services/capacityService');
   try {
+    if (isOnlineBookingClosedTime(date, time)) {
+      return res.json({
+        success: false,
+        available: false,
+        message: 'Les reservations en ligne ne sont pas disponibles le dimanche soir, le lundi et le mardi. Merci de choisir un autre creneau.'
+      });
+    }
     // Vérifier les bornes horaires (mêmes règles que POST /api/reservations)
     const bounds = getServiceBounds(date);
     const [h, m] = time.split(':').map(Number);

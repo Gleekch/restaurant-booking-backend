@@ -67,6 +67,20 @@ function isOnlineBookingClosedDate(date) {
   return day === 1 || day === 2;
 }
 
+function isOnlineBookingClosedTime(date, timeStr) {
+  const day = getRestaurantDay(date);
+
+  if (day === 1 || day === 2) {
+    return true;
+  }
+
+  if (day === 0) {
+    return timeToMinutes(timeStr) >= (15 * 60);
+  }
+
+  return false;
+}
+
 function timeToMinutes(timeStr) {
   if (typeof timeStr !== 'string' || !/^\d{2}:\d{2}$/.test(timeStr)) {
     throw new Error('Heure invalide. Format attendu : HH:MM');
@@ -203,11 +217,13 @@ async function getAvailableSlots(date, numberOfPeople, limit) {
   }
 
   const soirSlots = [];
-  for (let slot = bounds.soirStart; slot <= bounds.soirEnd; slot += 15) {
-    soirSlots.push({
-      time: formatTime(slot),
-      available: checkSlot(slot, SOIR_DURATION)
-    });
+  if (getRestaurantDay(date) !== 0) {
+    for (let slot = bounds.soirStart; slot <= bounds.soirEnd; slot += 15) {
+      soirSlots.push({
+        time: formatTime(slot),
+        available: checkSlot(slot, SOIR_DURATION)
+      });
+    }
   }
 
   return {
@@ -224,6 +240,7 @@ module.exports = {
   getOccupancyMap,
   getServiceBounds,
   isOnlineBookingClosedDate,
+  isOnlineBookingClosedTime,
   parseDateInput,
   timeToMinutes,
   getRestaurantNow,

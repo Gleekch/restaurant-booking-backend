@@ -9,6 +9,7 @@ const {
   getServiceBounds,
   getRestaurantNow,
   isOnlineBookingClosedDate,
+  isOnlineBookingClosedTime,
   parseDateInput,
   timeToMinutes
 } = require('../services/capacityService');
@@ -49,7 +50,7 @@ function buildServiceHoursMessage(bounds) {
 }
 
 function buildClosedDaysMessage() {
-  return 'Les reservations en ligne ne sont pas disponibles le lundi et le mardi. Merci de choisir un autre jour.';
+  return 'Les reservations en ligne ne sont pas disponibles le dimanche soir, le lundi et le mardi. Merci de choisir un autre creneau.';
 }
 
 function validatePublicReservationPayload(payload) {
@@ -68,6 +69,10 @@ function validatePublicReservationPayload(payload) {
   }
 
   if (isOnlineBookingClosedDate(normalizedDate)) {
+    throw new Error(buildClosedDaysMessage());
+  }
+
+  if (isOnlineBookingClosedTime(normalizedDate, payload.time)) {
     throw new Error(buildClosedDaysMessage());
   }
 
