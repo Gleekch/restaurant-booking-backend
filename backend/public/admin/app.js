@@ -3,6 +3,52 @@ const API_URL = window.location.origin;
 let reservations = [];
 let currentView = 'today';
 
+const MIDI_WAVE1_CUTOFF = '12:30';
+const SOIR_WAVE1_CUTOFF = '19:15';
+const ONLINE_CAPACITY_LIMIT = 50;
+const WAVE_LIMIT = 25;
+
+function getLoadClass(covers, limit) {
+    if (covers >= limit) return 'red';
+    if (covers >= limit * 0.8) return 'yellow';
+    return 'green';
+}
+
+function getWaveSummary(serviceReservations, service) {
+    const cutoff = service === 'midi' ? MIDI_WAVE1_CUTOFF : SOIR_WAVE1_CUTOFF;
+    const active = serviceReservations.filter(r => r.status !== 'cancelled');
+    const wave1 = active.filter(r => r.time < cutoff);
+    const wave2 = active.filter(r => r.time >= cutoff);
+    return {
+        wave1: { count: wave1.length, covers: wave1.reduce((s, r) => s + r.numberOfPeople, 0) },
+        wave2: { count: wave2.length, covers: wave2.reduce((s, r) => s + r.numberOfPeople, 0) }
+    };
+}
+
+function renderWaveBreakdown(waveSummary, service) {
+    const labels = service === 'midi'
+        ? { v1: 'Vague 1  12h–12h30', v2: 'Vague 2  12h30–13h15' }
+        : { v1: 'Vague 1  18h30–19h15', v2: 'Vague 2  19h15–21h00' };
+    return `
+        <div class="wave-breakdown">
+            <div class="wave-row">
+                <span class="wave-label">${labels.v1}</span>
+                <span class="wave-covers">${waveSummary.wave1.covers} cvts</span>
+                <div class="wave-track">
+                    <div class="wave-fill ${getLoadClass(waveSummary.wave1.covers, WAVE_LIMIT)}" style="width:${Math.min((waveSummary.wave1.covers / WAVE_LIMIT) * 100, 100)}%"></div>
+                </div>
+            </div>
+            <div class="wave-row">
+                <span class="wave-label">${labels.v2}</span>
+                <span class="wave-covers">${waveSummary.wave2.covers} cvts</span>
+                <div class="wave-track">
+                    <div class="wave-fill ${getLoadClass(waveSummary.wave2.covers, WAVE_LIMIT)}" style="width:${Math.min((waveSummary.wave2.covers / WAVE_LIMIT) * 100, 100)}%"></div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 // Fetch wrapper qui envoie l'API key (injectée par config.js)
 function apiFetch(url, options = {}) {
     const headers = options.headers || {};
@@ -163,6 +209,8 @@ function renderTodayView() {
 
     const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
+    const midiWaves = getWaveSummary(midi, 'midi');
+    const soirWaves = getWaveSummary(soir, 'soir');
 
     content.innerHTML = `
         <div class="summary-card">
@@ -183,8 +231,9 @@ function renderTodayView() {
             <div class="service-header midi">
                 <span class="icon">☀️</span>
                 <h3>Service du Midi</h3>
-                <span class="service-count">${midi.length} rés. / ${midiCovers} couv.</span>
+                <span class="service-count">${midi.length} rés. / ${midiCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
             </div>
+            ${renderWaveBreakdown(midiWaves, 'midi')}
             ${midi.length === 0 ?
                 '<div class="empty-state"><p>Aucune réservation pour le midi</p></div>' :
                 `<div class="reservations-grid">${midi.sort((a, b) => a.time.localeCompare(b.time)).map(r => renderReservationCard(r)).join('')}</div>`
@@ -195,8 +244,9 @@ function renderTodayView() {
             <div class="service-header soir">
                 <span class="icon">🌙</span>
                 <h3>Service du Soir</h3>
-                <span class="service-count">${soir.length} rés. / ${soirCovers} couv.</span>
+                <span class="service-count">${soir.length} rés. / ${soirCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
             </div>
+            ${renderWaveBreakdown(soirWaves, 'soir')}
             ${soir.length === 0 ?
                 '<div class="empty-state"><p>Aucune réservation pour le soir</p></div>' :
                 `<div class="reservations-grid">${soir.sort((a, b) => a.time.localeCompare(b.time)).map(r => renderReservationCard(r)).join('')}</div>`
