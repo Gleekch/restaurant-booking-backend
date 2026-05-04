@@ -2,7 +2,7 @@ const express = require('express');
 
 const router = express.Router();
 const Reservation = require('../models/Reservation');
-const { sendNotifications, sendConfirmationEmailToClient } = require('../services/notificationService');
+const { sendNotifications, sendConfirmationEmailToClient, sendCancellationEmailToClient } = require('../services/notificationService');
 const {
   checkAvailability,
   CAPACITY,
@@ -345,11 +345,18 @@ router.put('/:id', apiKey, async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    // Envoyer l'email de confirmation au client quand le personnel valide
     const statusChangedToConfirmed = req.body.status === 'confirmed' && existing.status !== 'confirmed';
+    const statusChangedToCancelled = req.body.status === 'cancelled' && existing.status !== 'cancelled';
+
     if (statusChangedToConfirmed && reservation.email) {
       sendConfirmationEmailToClient(reservation).catch(err =>
         console.error('Erreur email confirmation client:', err.message)
+      );
+    }
+
+    if (statusChangedToCancelled && reservation.email) {
+      sendCancellationEmailToClient(reservation).catch(err =>
+        console.error('Erreur email annulation client:', err.message)
       );
     }
 
@@ -371,6 +378,9 @@ router.put('/:id', apiKey, async (req, res) => {
 
 router.delete('/:id', apiKey, async (req, res) => {
   try {
+    const existing = await Reservation.findById(req.params.id);
+    const wasNotCancelled = existing && existing.status !== 'cancelled';
+
     const reservation = await Reservation.findByIdAndUpdate(
       req.params.id,
       { status: 'cancelled' },
@@ -382,6 +392,12 @@ router.delete('/:id', apiKey, async (req, res) => {
         success: false,
         message: 'Reservation non trouvee'
       });
+    }
+
+    if (wasNotCancelled && reservation.email) {
+      sendCancellationEmailToClient(reservation).catch(err =>
+        console.error('Erreur email annulation client:', err.message)
+      );
     }
 
     const io = req.app.get('io');

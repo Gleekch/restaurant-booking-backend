@@ -402,9 +402,86 @@ async function sendConfirmationEmailToClient(reservation) {
   }
 }
 
+// Email d'annulation — envoyé quand le personnel annule la réservation
+async function sendCancellationEmailToClient(reservation) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !reservation.email) return;
+
+  const dateStr = new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const phoneDisplay = process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19';
+
+  const mailOptions = {
+    from: `"Au Murmure des Flots 🌊" <${process.env.EMAIL_USER}>`,
+    to: reservation.email,
+    subject: `Annulation de votre réservation — ${new Date(reservation.date).toLocaleDateString('fr-FR')}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+      <body style="margin: 0; padding: 0; font-family: 'Georgia', serif; background-color: #f5f5f5;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 20px; text-align: center;">
+            <img src="https://raw.githubusercontent.com/Gleekch/restaurant-booking-backend/main/assets/logo.png" alt="Au Murmure des Flots" style="width: 120px; height: 120px; border-radius: 50%; background: white; padding: 10px; margin: 0 auto 20px; display: block;">
+            <h1 style="color: white; margin: 0; font-size: 28px; font-weight: 300;">Au Murmure des Flots</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px; font-style: italic;">Restaurant Bistronomique</p>
+          </div>
+          <div style="padding: 40px 30px;">
+            <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Annulation de réservation</h2>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${reservation.customerName},</p>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">
+              Nous vous informons que votre réservation a été annulée. Nous sommes désolés pour la gêne occasionnée.
+            </p>
+            <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 25px; border-radius: 10px; margin: 30px 0;">
+              <h3 style="color: #2c3e50; margin-top: 0; font-size: 18px; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📅 Réservation annulée</h3>
+              <table style="width: 100%; margin-top: 15px;">
+                <tr>
+                  <td style="padding: 8px 0; color: #666;"><strong>Date :</strong></td>
+                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${dateStr}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #666;"><strong>Heure :</strong></td>
+                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${reservation.time}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; color: #666;"><strong>Nombre de convives :</strong></td>
+                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</td>
+                </tr>
+              </table>
+            </div>
+            <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
+              <p style="color: #8b6914; margin: 0; font-size: 14px;">
+                <strong>💬 Vous souhaitez réserver à une autre date ?</strong><br>
+                N'hésitez pas à nous appeler au ${phoneDisplay} ou à effectuer une nouvelle réservation sur notre site.
+              </p>
+            </div>
+            <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e0e0e0;">
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📞 ${phoneDisplay}</p>
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📧 aumurmuredesflots@gmail.com</p>
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📍 44 rue du Général Lambert, 97436 Saint-Leu</p>
+            </div>
+          </div>
+          <div style="background-color: #2c3e50; padding: 30px; text-align: center;">
+            <p style="color: #ecf0f1; margin: 0 0 10px 0; font-size: 16px; font-style: italic;">"Où chaque repas devient un voyage culinaire"</p>
+            <p style="color: #7f8c8d; margin: 20px 0 0 0; font-size: 12px;">© 2025 Au Murmure des Flots - Tous droits réservés</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  };
+
+  try {
+    await emailTransporter.sendMail(mailOptions);
+    console.log(`✅ Email d'annulation envoyé à ${reservation.email}`);
+  } catch (error) {
+    console.error(`❌ Erreur email annulation:`, error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   sendNotifications,
   sendSMS,
   sendEmail,
-  sendConfirmationEmailToClient
+  sendConfirmationEmailToClient,
+  sendCancellationEmailToClient
 };
