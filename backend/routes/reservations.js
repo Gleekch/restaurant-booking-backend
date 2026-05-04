@@ -312,11 +312,22 @@ router.put('/:id', apiKey, async (req, res) => {
       });
     }
 
-    if (existing.status === 'cancelled' || existing.status === 'completed') {
+    if (existing.status === 'completed') {
       return res.status(400).json({
         success: false,
-        message: `Impossible de modifier une reservation ${existing.status === 'cancelled' ? 'annulee' : 'terminee'}`
+        message: 'Impossible de modifier une reservation terminee'
       });
+    }
+
+    // Une réservation annulée ne peut être que réactivée (changement de statut uniquement)
+    if (existing.status === 'cancelled') {
+      const allowedReactivation = req.body.status === 'pending' || req.body.status === 'confirmed';
+      if (!allowedReactivation) {
+        return res.status(400).json({
+          success: false,
+          message: 'Une reservation annulee ne peut etre que reactivee (pending ou confirmed)'
+        });
+      }
     }
 
     const { date, time, numberOfPeople } = req.body;
@@ -347,8 +358,9 @@ router.put('/:id', apiKey, async (req, res) => {
 
     const statusChangedToConfirmed = req.body.status === 'confirmed' && existing.status !== 'confirmed';
     const statusChangedToCancelled = req.body.status === 'cancelled' && existing.status !== 'cancelled';
+    const restoredFromCancelled = existing.status === 'cancelled' && (req.body.status === 'pending' || req.body.status === 'confirmed');
 
-    if (statusChangedToConfirmed && reservation.email) {
+    if ((statusChangedToConfirmed || (restoredFromCancelled && req.body.status === 'confirmed')) && reservation.email) {
       sendConfirmationEmailToClient(reservation).catch(err =>
         console.error('Erreur email confirmation client:', err.message)
       );
