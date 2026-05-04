@@ -149,17 +149,19 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
   const { occupancy, arrivals } = await getOccupancyMap(date, excludeId);
   const startMin = timeToMinutes(time);
 
-  // Vérification 1 : limite d'arrivées par créneau de 15 min
-  const slotArrivals = (arrivals[startMin] || 0) + requestedPeople;
-  if (slotArrivals > SLOT_HARD_LIMIT) {
-    const h = String(Math.floor(startMin / 60)).padStart(2, '0');
-    const m = String(startMin % 60).padStart(2, '0');
-    return {
-      available: false,
-      peakOccupancy: slotArrivals,
-      peakSlot: `${h}:${m}`,
-      capacity: SLOT_HARD_LIMIT
-    };
+  // Vérification 1 : limite d'arrivées par créneau — uniquement pour les réservations en ligne
+  if (effectiveLimit < CAPACITY) {
+    const slotArrivals = (arrivals[startMin] || 0) + requestedPeople;
+    if (slotArrivals > SLOT_HARD_LIMIT) {
+      const h = String(Math.floor(startMin / 60)).padStart(2, '0');
+      const m = String(startMin % 60).padStart(2, '0');
+      return {
+        available: false,
+        peakOccupancy: slotArrivals,
+        peakSlot: `${h}:${m}`,
+        capacity: SLOT_HARD_LIMIT
+      };
+    }
   }
 
   // Vérification 2 : capacité salle globale sur la durée du repas
