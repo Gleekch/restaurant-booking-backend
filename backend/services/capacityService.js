@@ -214,7 +214,7 @@ async function getAvailableSlots(date, numberOfPeople, limit) {
   }
 
   function checkSlot(startMin, duration) {
-    if (isToday && startMin < currentMinutes) {
+    if (isToday && startMin < currentMinutes - 15) {
       return false;
     }
 
