@@ -58,6 +58,8 @@ const STATUS_LABELS = {
 
 function pickRecommendedIndex(slots, service) {
   const preferred = service === 'midi' ? MIDI_PREFERRED_MIN : SOIR_PREFERRED_MIN;
+  // Pénalité de 3 points par tranche de 15 min d'écart avec l'horaire préféré
+  const DISTANCE_PENALTY = 3;
   let best = -1;
 
   for (let i = 0; i < slots.length; i++) {
@@ -70,10 +72,10 @@ function pickRecommendedIndex(slots, service) {
     }
 
     const b = slots[best];
-    if (s.score > b.score) { best = i; continue; }
-    if (s.score === b.score && Math.abs(s._timeMin - preferred) < Math.abs(b._timeMin - preferred)) {
-      best = i;
-    }
+    const sAdj = s.score - (Math.abs(s._timeMin - preferred) / 15) * DISTANCE_PENALTY;
+    const bAdj = b.score - (Math.abs(b._timeMin - preferred) / 15) * DISTANCE_PENALTY;
+
+    if (sAdj > bAdj) { best = i; }
   }
 
   return best;
