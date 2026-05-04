@@ -646,11 +646,105 @@ function showReservationDetail(r) {
             ${r.status !== 'cancelled' ? `
                 <button class="btn btn-danger" onclick="updateStatus('${r._id}', 'cancelled'); closeModal();"><span class="icon">❌</span> Annuler</button>
             ` : ''}
+            <button class="btn btn-secondary" onclick="openEditForm('${r._id}')">✏️ Modifier</button>
             <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
         </div>
     `;
 
     document.getElementById('reservation-modal').classList.add('active');
+}
+
+// Open Edit Form inside the detail modal
+function openEditForm(id) {
+    const r = reservations.find(r => r._id === id);
+    if (!r) return;
+
+    const existingDate = new Date(r.date).toISOString().split('T')[0];
+
+    document.getElementById('modal-title').textContent = 'Modifier la réservation';
+    document.getElementById('modal-body').innerHTML = `
+        <form id="edit-reservation-form">
+            <div class="form-group">
+                <label>Nom du client *</label>
+                <input type="text" id="edit-name" value="${r.customerName}" required>
+            </div>
+            <div class="form-group">
+                <label>Téléphone *</label>
+                <input type="tel" id="edit-phone" value="${r.phoneNumber}" required>
+            </div>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="edit-email" value="${r.email || ''}">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Date *</label>
+                    <input type="date" id="edit-date" value="${existingDate}" required>
+                </div>
+                <div class="form-group">
+                    <label>Heure *</label>
+                    <input type="time" id="edit-time" value="${r.time}" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Nombre de personnes *</label>
+                <input type="number" id="edit-people" min="1" max="30" value="${r.numberOfPeople}" required>
+            </div>
+            <div class="form-group">
+                <label>Statut</label>
+                <select id="edit-status">
+                    <option value="pending" ${r.status === 'pending' ? 'selected' : ''}>En attente</option>
+                    <option value="confirmed" ${r.status === 'confirmed' ? 'selected' : ''}>Confirmé</option>
+                    <option value="cancelled" ${r.status === 'cancelled' ? 'selected' : ''}>Annulé</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Notes / Demandes spéciales</label>
+                <textarea id="edit-requests" rows="3">${r.specialRequests || ''}</textarea>
+            </div>
+            <div class="detail-actions">
+                <button type="submit" class="btn btn-primary">Enregistrer</button>
+                <button type="button" class="btn btn-secondary" onclick="showReservationDetail(reservations.find(r => r._id === '${id}'))">Annuler</button>
+            </div>
+        </form>
+    `;
+
+    document.getElementById('edit-reservation-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await submitEdit(id);
+    });
+}
+
+async function submitEdit(id) {
+    const data = {
+        customerName: document.getElementById('edit-name').value,
+        phoneNumber: document.getElementById('edit-phone').value,
+        email: document.getElementById('edit-email').value || undefined,
+        date: document.getElementById('edit-date').value,
+        time: document.getElementById('edit-time').value,
+        numberOfPeople: parseInt(document.getElementById('edit-people').value),
+        status: document.getElementById('edit-status').value,
+        specialRequests: document.getElementById('edit-requests').value || undefined
+    };
+
+    try {
+        const response = await apiFetch(`${API_URL}/api/reservations/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        if (!response.ok) {
+            const result = await response.json().catch(() => ({}));
+            throw new Error(result.message || 'Erreur lors de la modification');
+        }
+
+        showToast('Réservation modifiée', 'success');
+        closeModal();
+        loadReservations();
+    } catch (error) {
+        showToast(error.message || 'Erreur lors de la modification', 'error');
+    }
 }
 
 // Close Modal
