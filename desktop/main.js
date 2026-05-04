@@ -7,7 +7,9 @@ const io = require('socket.io-client');
 
 const DEFAULT_BACKEND_URL = 'https://restaurant-booking-backend-y3sp.onrender.com';
 
-// Prevent EPIPE crashes from socket pipes closing unexpectedly on Windows.
+// Prevent EPIPE crashes on Windows — streams emit 'error' events, not exceptions.
+if (process.stdout) process.stdout.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
+if (process.stderr) process.stderr.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
 process.on('uncaughtException', (error) => {
   if (error && error.code === 'EPIPE') return;
   throw error;
