@@ -2,7 +2,7 @@ const express = require('express');
 
 const router = express.Router();
 const Reservation = require('../models/Reservation');
-const { sendNotifications } = require('../services/notificationService');
+const { sendNotifications, sendConfirmationEmailToClient } = require('../services/notificationService');
 const {
   checkAvailability,
   CAPACITY,
@@ -344,6 +344,14 @@ router.put('/:id', apiKey, async (req, res) => {
       req.body,
       { new: true, runValidators: true }
     );
+
+    // Envoyer l'email de confirmation au client quand le personnel valide
+    const statusChangedToConfirmed = req.body.status === 'confirmed' && existing.status !== 'confirmed';
+    if (statusChangedToConfirmed && reservation.email) {
+      sendConfirmationEmailToClient(reservation).catch(err =>
+        console.error('Erreur email confirmation client:', err.message)
+      );
+    }
 
     const io = req.app.get('io');
     io.emit('update-reservation', reservation);
