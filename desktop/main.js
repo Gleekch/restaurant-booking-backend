@@ -8,8 +8,8 @@ const io = require('socket.io-client');
 const DEFAULT_BACKEND_URL = 'https://restaurant-booking-backend-y3sp.onrender.com';
 
 // En mode packagé (exe), stdout/stderr causent EPIPE sur Windows.
-// app.isPackaged est l'API officielle Electron pour détecter le mode production.
-const IS_PACKAGED = app.isPackaged;
+// __dirname contient 'app.asar' uniquement quand l'app est packagée.
+const IS_PACKAGED = __dirname.includes('app.asar') || app.isPackaged;
 process.on('uncaughtException', (error) => {
   if (error && error.code === 'EPIPE') return;
   if (IS_PACKAGED) return;
