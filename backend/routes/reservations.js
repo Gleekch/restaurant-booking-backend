@@ -15,7 +15,7 @@ const {
 } = require('../services/capacityService');
 const { apiKey } = require('../middleware/auth');
 
-const ONLINE_BOOKING_LIMIT = 8;
+const ONLINE_BOOKING_LIMIT = parseInt(process.env.ONLINE_BOOKING_LIMIT, 10) || 10;
 const ONLINE_CAPACITY_LIMIT = parseInt(process.env.ONLINE_CAPACITY, 10) || 50;
 const RESTAURANT_PHONE_DISPLAY = process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19';
 const ONLINE_LIMIT_NOTICE = `Pour garantir un accueil soigné à chaque table et le bien-être de notre équipe, nous limitons les réservations en ligne. Pour toute demande, appelez-nous au ${process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19'}.`;
