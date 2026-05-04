@@ -688,7 +688,7 @@ function openEditForm(id) {
             </div>
             <div class="form-group">
                 <label>Nombre de personnes *</label>
-                <input type="number" id="edit-people" min="1" max="30" value="${r.numberOfPeople}" required>
+                <input type="number" id="edit-people" min="1" value="${r.numberOfPeople}" required>
             </div>
             <div class="form-group">
                 <label>Statut</label>
