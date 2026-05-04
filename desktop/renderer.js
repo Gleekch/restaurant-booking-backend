@@ -18,6 +18,9 @@ let notifiedReservations = new Set();
 const MIDI_WAVE1_CUTOFF = '12:30';
 const SOIR_WAVE1_CUTOFF = '19:15';
 
+// Limite couverts en ligne — miroir de ONLINE_CAPACITY côté backend (défaut 50)
+const ONLINE_CAPACITY_LIMIT = 50;
+
 // Éléments DOM
 const connectionStatus = document.getElementById('connection-status');
 const reservationsContainer = document.getElementById('reservations-container');
@@ -86,7 +89,7 @@ function getServiceSummary(serviceReservations) {
     };
 }
 
-function getLoadClass(totalCovers, limit = 50) {
+function getLoadClass(totalCovers, limit = ONLINE_CAPACITY_LIMIT) {
     if (totalCovers >= limit) {
         return 'danger';
     }
@@ -1161,11 +1164,11 @@ function renderOperationalDayView() {
             ${showMidi ? `
                 <div class="service-summary-card midi service-clickable" data-date="${selectedDate}" data-service="midi">
                     <h3>☀️ Service du Midi (12h00 - 13h15)</h3>
-                    <p style="font-size: 24px; font-weight: bold;">${midiSummary.totalCovers}/50 couverts</p>
+                    <p style="font-size: 24px; font-weight: bold;">${midiSummary.totalCovers}/${ONLINE_CAPACITY_LIMIT} couverts</p>
                     <p>${midiSummary.totalReservations} réservations</p>
                     ${midiSummary.cancelledCount > 0 ? `<p>${midiSummary.cancelledCount} annulée(s) non comptée(s)</p>` : ''}
                     <div class="progress-track">
-                        <div class="progress-fill ${getLoadClass(midiSummary.totalCovers)}" style="width: ${Math.min((midiSummary.totalCovers / 50) * 100, 100)}%;"></div>
+                        <div class="progress-fill ${getLoadClass(midiSummary.totalCovers)}" style="width: ${Math.min((midiSummary.totalCovers / ONLINE_CAPACITY_LIMIT) * 100, 100)}%;"></div>
                     </div>
                     ${renderWaveBreakdown(midiWaves, 'midi')}
                     <div class="wave-recommended" id="wave-recommended-midi"></div>
@@ -1174,11 +1177,11 @@ function renderOperationalDayView() {
             ${showSoir ? `
                 <div class="service-summary-card soir service-clickable" data-date="${selectedDate}" data-service="soir">
                     <h3>🌙 Service du Soir (18h30 - 21h00)</h3>
-                    <p style="font-size: 24px; font-weight: bold;">${soirSummary.totalCovers}/50 couverts</p>
+                    <p style="font-size: 24px; font-weight: bold;">${soirSummary.totalCovers}/${ONLINE_CAPACITY_LIMIT} couverts</p>
                     <p>${soirSummary.totalReservations} réservations</p>
                     ${soirSummary.cancelledCount > 0 ? `<p>${soirSummary.cancelledCount} annulée(s) non comptée(s)</p>` : ''}
                     <div class="progress-track">
-                        <div class="progress-fill ${getLoadClass(soirSummary.totalCovers)}" style="width: ${Math.min((soirSummary.totalCovers / 50) * 100, 100)}%;"></div>
+                        <div class="progress-fill ${getLoadClass(soirSummary.totalCovers)}" style="width: ${Math.min((soirSummary.totalCovers / ONLINE_CAPACITY_LIMIT) * 100, 100)}%;"></div>
                     </div>
                     ${renderWaveBreakdown(soirWaves, 'soir')}
                     <div class="wave-recommended" id="wave-recommended-soir"></div>

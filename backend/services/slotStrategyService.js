@@ -9,7 +9,6 @@ const {
   getOccupancyMap,
   getServiceBounds,
   timeToMinutes,
-  CAPACITY,
   SLOT_MAX_COVERS
 } = require('./capacityService');
 
