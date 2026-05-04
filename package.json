@@ -1,6 +1,6 @@
 {
   "name": "au-murmure-des-flots",
-  "version": "1.0.0",
+  "version": "2.2.0",
   "description": "Système de réservation Au Murmure des Flots",
   "main": "desktop/main.js",
   "author": "Au Murmure des Flots",
