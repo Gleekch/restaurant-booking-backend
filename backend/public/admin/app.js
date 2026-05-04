@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Navigation
 function initNavigation() {
-    document.querySelectorAll('.nav-item').forEach(item => {
+    document.querySelectorAll('.rail-item').forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const view = item.dataset.view;
@@ -40,7 +40,7 @@ function initNavigation() {
                 return;
             }
 
-            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            document.querySelectorAll('.rail-item').forEach(i => i.classList.remove('active'));
             item.classList.add('active');
             currentView = view;
             renderView();
