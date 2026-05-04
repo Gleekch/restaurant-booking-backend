@@ -54,13 +54,8 @@ function loadEnvironmentConfig() {
 
 const loadedEnvPath = loadEnvironmentConfig();
 
-// Prevent EPIPE crashes when stdout/stderr are closed on Windows.
-const originalLog = console.log;
-const originalError = console.error;
-const originalWarn = console.warn;
-console.log = (...args) => { try { originalLog.apply(console, args); } catch (error) { if (error.code !== 'EPIPE') throw error; } };
-console.error = (...args) => { try { originalError.apply(console, args); } catch (error) { if (error.code !== 'EPIPE') throw error; } };
-console.warn = (...args) => { try { originalWarn.apply(console, args); } catch (error) { if (error.code !== 'EPIPE') throw error; } };
+// Dans l'exe portable, stdout/stderr n'ont pas de console → EPIPE inévitable.
+// On neutralise complètement toutes les sorties console.
 
 const BACKEND_URL = (process.env.BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/$/, '');
 const API_KEY = process.env.API_KEY || '';
@@ -71,37 +66,10 @@ let mainWindow;
 let tray;
 let socket;
 
-function writeToStream(stream, args) {
-  if (IS_PACKAGED) return; // pas de stdout/stderr dans l'exe packagé
-  if (!stream || typeof stream.write !== 'function' || stream.destroyed || stream.writable === false) {
-    return;
-  }
+function writeToStream() {}
+function safeLog() {}
+function safeError() {
 
-  try {
-    stream.write(`${util.format(...args)}\n`);
-  } catch (error) {
-    if (error && error.code !== 'EPIPE') throw error;
-  }
-}
-
-function safeLog(...args) {
-  try {
-    writeToStream(process.stdout, args);
-  } catch (error) {
-    if (error && error.code !== 'EPIPE') {
-      throw error;
-    }
-  }
-}
-
-function safeError(...args) {
-  try {
-    writeToStream(process.stderr, args);
-  } catch (error) {
-    if (error && error.code !== 'EPIPE') {
-      throw error;
-    }
-  }
 }
 
 if (loadedEnvPath) {
@@ -112,15 +80,7 @@ if (loadedEnvPath) {
 
 safeLog('Backend cible:', BACKEND_URL);
 
-function safeWarn(...args) {
-  try {
-    writeToStream(process.stderr, args);
-  } catch (error) {
-    if (error && error.code !== 'EPIPE') {
-      throw error;
-    }
-  }
-}
+function safeWarn() {}
 
 function buildAuthHeaders() {
   const key = process.env.API_KEY || API_KEY;
