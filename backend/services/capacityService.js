@@ -192,13 +192,19 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
 function getServiceBounds(date) {
   const day = getRestaurantDay(date);
   const isWeekend = day === 0 || day === 6;
+  const isMidiExtended = day === 5 || day === 6 || day === 0; // ven, sam, dim
+  const isSoirWeekend = day === 6; // sam uniquement (dim = pas de soir)
 
   return {
     isWeekend,
-    midiStart: 720,
-    midiEnd: isWeekend ? 825 : 795,
-    soirStart: 1110,
-    soirEnd: isWeekend ? 1290 : 1260
+    isMidiExtended,
+    isSoirWeekend,
+    midiStart: 720,                              // 12:00
+    midiEnd: isMidiExtended ? 840 : 810,         // 14:00 ou 13:30
+    soirStart: 1080,                             // 18:00
+    soirEnd: isSoirWeekend ? 1320 : 1290,        // 22:00 ou 21:30
+    midiWaveCutoff: isMidiExtended ? 780 : 765,  // 13:00 ou 12:45
+    soirWaveCutoff: isSoirWeekend ? 1200 : 1185  // 20:00 ou 19:45
   };
 }
 

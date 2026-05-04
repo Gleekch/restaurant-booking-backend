@@ -15,19 +15,6 @@ const {
 const MIDI_DURATION = parseInt(process.env.MIDI_DURATION_MIN, 10) || 90;
 const SOIR_DURATION = parseInt(process.env.SOIR_DURATION_MIN, 10) || 120;
 
-function parseEnvMinutes(envKey, fallbackHH, fallbackMM) {
-  const raw = process.env[envKey];
-  if (raw && /^\d{2}:\d{2}$/.test(raw)) {
-    try {
-      return timeToMinutes(raw);
-    } catch (_) { /* ignore */ }
-  }
-  return fallbackHH * 60 + fallbackMM;
-}
-
-const MIDI_WAVE1_CUTOFF = parseEnvMinutes('SLOT_MIDI_WAVE1_CUTOFF', 12, 30); // 12:30
-const SOIR_WAVE1_CUTOFF = parseEnvMinutes('SLOT_SOIR_WAVE1_CUTOFF', 19, 15); // 19:15
-
 // Heure cible préférée par service pour départager les ex-aequo de score
 const MIDI_PREFERRED_MIN = 12 * 60 + 15; // 12:15
 const SOIR_PREFERRED_MIN = 19 * 60 + 30; // 19:30
@@ -35,20 +22,16 @@ const SOIR_PREFERRED_MIN = 19 * 60 + 30; // 19:30
 function getConfig() {
   return {
     recommendationsEnabled: process.env.SLOT_RECOMMENDATIONS_ENABLED === 'true',
-    balancingStrict: process.env.SLOT_BALANCING_STRICT === 'true',
-    waveCutoffs: {
-      midi: process.env.SLOT_MIDI_WAVE1_CUTOFF || '12:30',
-      soir: process.env.SLOT_SOIR_WAVE1_CUTOFF || '19:15'
-    }
+    balancingStrict: process.env.SLOT_BALANCING_STRICT === 'true'
   };
 }
 
 function getWave(timeMin, bounds) {
   if (timeMin >= bounds.midiStart && timeMin <= bounds.midiEnd) {
-    return timeMin < MIDI_WAVE1_CUTOFF ? 'midi-1' : 'midi-2';
+    return timeMin < bounds.midiWaveCutoff ? 'midi-1' : 'midi-2';
   }
   if (timeMin >= bounds.soirStart && timeMin <= bounds.soirEnd) {
-    return timeMin < SOIR_WAVE1_CUTOFF ? 'soir-1' : 'soir-2';
+    return timeMin < bounds.soirWaveCutoff ? 'soir-1' : 'soir-2';
   }
   return null;
 }

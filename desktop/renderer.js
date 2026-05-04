@@ -14,10 +14,6 @@ let serviceDetailState = null;
 let editingReservationId = null;
 let notifiedReservations = new Set();
 
-// Cutoffs de vague (doivent correspondre à slotStrategyService côté backend)
-const MIDI_WAVE1_CUTOFF = '12:30';
-const SOIR_WAVE1_CUTOFF = '19:15';
-
 // Limite couverts en ligne — miroir de ONLINE_CAPACITY côté backend (défaut 50)
 const ONLINE_CAPACITY_LIMIT = 50;
 
@@ -101,8 +97,7 @@ function getLoadClass(totalCovers, limit = ONLINE_CAPACITY_LIMIT) {
     return '';
 }
 
-function getWaveSummary(serviceReservations, service) {
-    const cutoff = service === 'midi' ? MIDI_WAVE1_CUTOFF : SOIR_WAVE1_CUTOFF;
+function getWaveSummary(serviceReservations, cutoff) {
     const active = serviceReservations.filter(isActiveReservation);
     const wave1 = active.filter(r => r.time < cutoff);
     const wave2 = active.filter(r => r.time >= cutoff);
@@ -112,10 +107,11 @@ function getWaveSummary(serviceReservations, service) {
     };
 }
 
-function renderWaveBreakdown(waveSummary, service) {
-    const labels = service === 'midi'
-        ? { v1: 'Vague 1  12h–12h30', v2: 'Vague 2  12h30–13h15' }
-        : { v1: 'Vague 1  18h30–19h15', v2: 'Vague 2  19h15–21h00' };
+function formatMinutes(min) {
+    return `${String(Math.floor(min / 60)).padStart(2, '0')}h${String(min % 60).padStart(2, '0')}`;
+}
+
+function renderWaveBreakdown(waveSummary, labels) {
     const limit = 25;
     return `
         <div class="wave-breakdown">
@@ -1148,8 +1144,30 @@ function renderOperationalDayView() {
     const soirReservations = dayReservations.filter(r => getReservationService(r) === 'soir');
     const midiSummary = getServiceSummary(midiReservations);
     const soirSummary = getServiceSummary(soirReservations);
-    const midiWaves = getWaveSummary(midiReservations, 'midi');
-    const soirWaves = getWaveSummary(soirReservations, 'soir');
+    const selectedDateObj = parseDateInput(selectedDate);
+    const dayOfWeek = selectedDateObj.getDay();
+    const isMidiExtended = dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0;
+    const isSoirWeekend = dayOfWeek === 6;
+
+    const midiCutoffMin = isMidiExtended ? 780 : 765; // 13:00 ou 12:45
+    const soirCutoffMin = isSoirWeekend ? 1200 : 1185; // 20:00 ou 19:45
+    const midiCutoffStr = formatMinutes(midiCutoffMin);
+    const soirCutoffStr = formatMinutes(soirCutoffMin);
+    const midiEndStr = isMidiExtended ? '14h00' : '13h30';
+    const soirEndStr = isSoirWeekend ? '22h00' : '21h30';
+
+    const midiWaveLabels = {
+        v1: `Vague 1  12h00–${midiCutoffStr}`,
+        v2: `Vague 2  ${midiCutoffStr}–${midiEndStr}`
+    };
+    const soirWaveLabels = {
+        v1: `Vague 1  18h00–${soirCutoffStr}`,
+        v2: `Vague 2  ${soirCutoffStr}–${soirEndStr}`
+    };
+
+    const toTimeStr = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+    const midiWaves = getWaveSummary(midiReservations, toTimeStr(midiCutoffMin));
+    const soirWaves = getWaveSummary(soirReservations, toTimeStr(soirCutoffMin));
     const showMidi = currentServiceFilter === 'all' || currentServiceFilter === 'midi';
     const showSoir = currentServiceFilter === 'all' || currentServiceFilter === 'soir';
 
@@ -1163,27 +1181,27 @@ function renderOperationalDayView() {
         <div class="service-summary-grid">
             ${showMidi ? `
                 <div class="service-summary-card midi service-clickable" data-date="${selectedDate}" data-service="midi">
-                    <h3>☀️ Service du Midi (12h00 - 13h15)</h3>
+                    <h3>☀️ Service du Midi (12h00 - ${midiEndStr})</h3>
                     <p style="font-size: 24px; font-weight: bold;">${midiSummary.totalCovers}/${ONLINE_CAPACITY_LIMIT} couverts</p>
                     <p>${midiSummary.totalReservations} réservations</p>
                     ${midiSummary.cancelledCount > 0 ? `<p>${midiSummary.cancelledCount} annulée(s) non comptée(s)</p>` : ''}
                     <div class="progress-track">
                         <div class="progress-fill ${getLoadClass(midiSummary.totalCovers)}" style="width: ${Math.min((midiSummary.totalCovers / ONLINE_CAPACITY_LIMIT) * 100, 100)}%;"></div>
                     </div>
-                    ${renderWaveBreakdown(midiWaves, 'midi')}
+                    ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
                     <div class="wave-recommended" id="wave-recommended-midi"></div>
                 </div>
             ` : ''}
             ${showSoir ? `
                 <div class="service-summary-card soir service-clickable" data-date="${selectedDate}" data-service="soir">
-                    <h3>🌙 Service du Soir (18h30 - 21h00)</h3>
+                    <h3>🌙 Service du Soir (18h00 - ${soirEndStr})</h3>
                     <p style="font-size: 24px; font-weight: bold;">${soirSummary.totalCovers}/${ONLINE_CAPACITY_LIMIT} couverts</p>
                     <p>${soirSummary.totalReservations} réservations</p>
                     ${soirSummary.cancelledCount > 0 ? `<p>${soirSummary.cancelledCount} annulée(s) non comptée(s)</p>` : ''}
                     <div class="progress-track">
                         <div class="progress-fill ${getLoadClass(soirSummary.totalCovers)}" style="width: ${Math.min((soirSummary.totalCovers / ONLINE_CAPACITY_LIMIT) * 100, 100)}%;"></div>
                     </div>
-                    ${renderWaveBreakdown(soirWaves, 'soir')}
+                    ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
                     <div class="wave-recommended" id="wave-recommended-soir"></div>
                 </div>
             ` : ''}

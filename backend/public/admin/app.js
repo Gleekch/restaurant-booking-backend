@@ -3,10 +3,18 @@ const API_URL = window.location.origin;
 let reservations = [];
 let currentView = 'today';
 
-const MIDI_WAVE1_CUTOFF = '12:30';
-const SOIR_WAVE1_CUTOFF = '19:15';
 const ONLINE_CAPACITY_LIMIT = 50;
 const WAVE_LIMIT = 25;
+
+function toTimeStr(min) {
+    return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
+}
+
+function formatHeure(min) {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return m === 0 ? `${h}h00` : `${h}h${String(m).padStart(2, '0')}`;
+}
 
 function getLoadClass(covers, limit) {
     if (covers >= limit) return 'red';
@@ -14,21 +22,29 @@ function getLoadClass(covers, limit) {
     return 'green';
 }
 
-function getWaveSummary(serviceReservations, service) {
-    const cutoff = service === 'midi' ? MIDI_WAVE1_CUTOFF : SOIR_WAVE1_CUTOFF;
+function getWaveCutoffs(date) {
+    const day = date.getDay();
+    const isMidiExtended = day === 5 || day === 6 || day === 0;
+    const isSoirWeekend = day === 6;
+    return {
+        midiCutoffMin: isMidiExtended ? 780 : 765,
+        soirCutoffMin: isSoirWeekend ? 1200 : 1185,
+        midiEndStr: isMidiExtended ? '14h00' : '13h30',
+        soirEndStr: isSoirWeekend ? '22h00' : '21h30'
+    };
+}
+
+function getWaveSummary(serviceReservations, cutoffStr) {
     const active = serviceReservations.filter(r => r.status !== 'cancelled');
-    const wave1 = active.filter(r => r.time < cutoff);
-    const wave2 = active.filter(r => r.time >= cutoff);
+    const wave1 = active.filter(r => r.time < cutoffStr);
+    const wave2 = active.filter(r => r.time >= cutoffStr);
     return {
         wave1: { count: wave1.length, covers: wave1.reduce((s, r) => s + r.numberOfPeople, 0) },
         wave2: { count: wave2.length, covers: wave2.reduce((s, r) => s + r.numberOfPeople, 0) }
     };
 }
 
-function renderWaveBreakdown(waveSummary, service) {
-    const labels = service === 'midi'
-        ? { v1: 'Vague 1  12h–12h30', v2: 'Vague 2  12h30–13h15' }
-        : { v1: 'Vague 1  18h30–19h15', v2: 'Vague 2  19h15–21h00' };
+function renderWaveBreakdown(waveSummary, labels) {
     return `
         <div class="wave-breakdown">
             <div class="wave-row">
@@ -209,8 +225,19 @@ function renderTodayView() {
 
     const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
-    const midiWaves = getWaveSummary(midi, 'midi');
-    const soirWaves = getWaveSummary(soir, 'soir');
+    const cutoffs = getWaveCutoffs(displayDate);
+    const midiCutoffStr = toTimeStr(cutoffs.midiCutoffMin);
+    const soirCutoffStr = toTimeStr(cutoffs.soirCutoffMin);
+    const midiWaveLabels = {
+        v1: `Vague 1  12h00–${formatHeure(cutoffs.midiCutoffMin)}`,
+        v2: `Vague 2  ${formatHeure(cutoffs.midiCutoffMin)}–${cutoffs.midiEndStr}`
+    };
+    const soirWaveLabels = {
+        v1: `Vague 1  18h00–${formatHeure(cutoffs.soirCutoffMin)}`,
+        v2: `Vague 2  ${formatHeure(cutoffs.soirCutoffMin)}–${cutoffs.soirEndStr}`
+    };
+    const midiWaves = getWaveSummary(midi, midiCutoffStr);
+    const soirWaves = getWaveSummary(soir, soirCutoffStr);
 
     content.innerHTML = `
         <div class="summary-card">
@@ -233,7 +260,7 @@ function renderTodayView() {
                 <h3>Service du Midi</h3>
                 <span class="service-count">${midi.length} rés. / ${midiCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
             </div>
-            ${renderWaveBreakdown(midiWaves, 'midi')}
+            ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
             ${midi.length === 0 ?
                 '<div class="empty-state"><p>Aucune réservation pour le midi</p></div>' :
                 `<div class="reservations-grid">${midi.sort((a, b) => a.time.localeCompare(b.time)).map(r => renderReservationCard(r)).join('')}</div>`
@@ -246,7 +273,7 @@ function renderTodayView() {
                 <h3>Service du Soir</h3>
                 <span class="service-count">${soir.length} rés. / ${soirCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
             </div>
-            ${renderWaveBreakdown(soirWaves, 'soir')}
+            ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
             ${soir.length === 0 ?
                 '<div class="empty-state"><p>Aucune réservation pour le soir</p></div>' :
                 `<div class="reservations-grid">${soir.sort((a, b) => a.time.localeCompare(b.time)).map(r => renderReservationCard(r)).join('')}</div>`
