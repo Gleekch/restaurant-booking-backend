@@ -56,24 +56,37 @@ const STATUS_LABELS = {
   full: 'Complet'
 };
 
+// Fenêtre dorée soir : 19h00–20h30 — aucune pénalité dans cette plage
+const SOIR_WINDOW_START = 19 * 60;       // 19:00 = 1140
+const SOIR_WINDOW_END   = 20 * 60 + 30; // 20:30 = 1230
+const DISTANCE_PENALTY  = 6;            // points par tranche de 15 min hors fenêtre
+
+function getDistanceFromWindow(timeMin, windowStart, windowEnd) {
+  if (timeMin >= windowStart && timeMin <= windowEnd) return 0;
+  if (timeMin < windowStart) return (windowStart - timeMin) / 15;
+  return (timeMin - windowEnd) / 15;
+}
+
 function pickRecommendedIndex(slots, service) {
-  const preferred = service === 'midi' ? MIDI_PREFERRED_MIN : SOIR_PREFERRED_MIN;
-  // Pénalité de 6 points par tranche de 15 min d'écart avec l'horaire préféré
-  const DISTANCE_PENALTY = 6;
   let best = -1;
 
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
     if (!s.available) continue;
 
-    if (best === -1) {
-      best = i;
-      continue;
-    }
+    if (best === -1) { best = i; continue; }
 
     const b = slots[best];
-    const sAdj = s.score - (Math.abs(s._timeMin - preferred) / 15) * DISTANCE_PENALTY;
-    const bAdj = b.score - (Math.abs(b._timeMin - preferred) / 15) * DISTANCE_PENALTY;
+
+    let sAdj, bAdj;
+    if (service === 'soir') {
+      sAdj = s.score - getDistanceFromWindow(s._timeMin, SOIR_WINDOW_START, SOIR_WINDOW_END) * DISTANCE_PENALTY;
+      bAdj = b.score - getDistanceFromWindow(b._timeMin, SOIR_WINDOW_START, SOIR_WINDOW_END) * DISTANCE_PENALTY;
+    } else {
+      // Midi : préférence centrée sur 12h15
+      sAdj = s.score - (Math.abs(s._timeMin - MIDI_PREFERRED_MIN) / 15) * DISTANCE_PENALTY;
+      bAdj = b.score - (Math.abs(b._timeMin - MIDI_PREFERRED_MIN) / 15) * DISTANCE_PENALTY;
+    }
 
     if (sAdj > bAdj) { best = i; }
   }
