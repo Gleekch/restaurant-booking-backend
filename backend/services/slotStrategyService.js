@@ -58,8 +58,8 @@ const STATUS_LABELS = {
 
 function pickRecommendedIndex(slots, service) {
   const preferred = service === 'midi' ? MIDI_PREFERRED_MIN : SOIR_PREFERRED_MIN;
-  // Pénalité de 3 points par tranche de 15 min d'écart avec l'horaire préféré
-  const DISTANCE_PENALTY = 3;
+  // Pénalité de 6 points par tranche de 15 min d'écart avec l'horaire préféré
+  const DISTANCE_PENALTY = 6;
   let best = -1;
 
   for (let i = 0; i < slots.length; i++) {
