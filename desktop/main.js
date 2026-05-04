@@ -7,18 +7,12 @@ const io = require('socket.io-client');
 
 const DEFAULT_BACKEND_URL = 'https://restaurant-booking-backend-y3sp.onrender.com';
 
-// Dans l'exe packagé, stdout/stderr sont des pipes sans lecteur sur Windows → EPIPE.
-// On les neutralise dès le départ pour éviter tout crash.
-if (process.stdout) {
-  process.stdout.on('error', () => {});
-  try { process.stdout.write = () => true; } catch (_) {}
-}
-if (process.stderr) {
-  process.stderr.on('error', () => {});
-  try { process.stderr.write = () => true; } catch (_) {}
-}
+// En mode packagé (exe), stdout/stderr n'ont pas de lecteur → EPIPE sur Windows.
+// process.defaultApp est true seulement en mode dev (electron .), absent en production.
+const IS_PACKAGED = !process.defaultApp;
 process.on('uncaughtException', (error) => {
   if (error && error.code === 'EPIPE') return;
+  if (IS_PACKAGED) return; // évite tout crash dialog en production
   throw error;
 });
 
@@ -78,6 +72,7 @@ let tray;
 let socket;
 
 function writeToStream(stream, args) {
+  if (IS_PACKAGED) return; // pas de stdout/stderr dans l'exe packagé
   if (!stream || typeof stream.write !== 'function' || stream.destroyed || stream.writable === false) {
     return;
   }
