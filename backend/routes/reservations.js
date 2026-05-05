@@ -159,6 +159,22 @@ router.post('/', async (req, res) => {
   try {
     const { date, time } = req.body;
     const validation = validatePublicReservationPayload(req.body);
+
+    // Vérification doublon : même téléphone + même date + statut actif
+    const { startDate, endDate } = getDayRange(validation.normalizedDate);
+    const existingBooking = await Reservation.findOne({
+      phoneNumber: req.body.phoneNumber,
+      date: { $gte: startDate, $lt: endDate },
+      status: { $ne: 'cancelled' }
+    });
+
+    if (existingBooking) {
+      return res.status(400).json({
+        success: false,
+        message: `Votre réservation du ${new Date(existingBooking.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à ${existingBooking.time} a déjà été prise en compte. Vous recevrez une confirmation par email. Pour toute modification, appelez-nous au ${RESTAURANT_PHONE_DISPLAY}.`
+      });
+    }
+
     const availability = await checkAvailability(date, time, validation.requestedPeople, ONLINE_CAPACITY_LIMIT);
 
     if (!availability.available) {
