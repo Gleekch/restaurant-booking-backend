@@ -59,6 +59,11 @@ function validatePublicReservationPayload(payload) {
   parseDateInput(normalizedDate);
 
   const requestedPeople = getPartySize(payload.numberOfPeople);
+
+  if (!payload.email || typeof payload.email !== 'string' || !payload.email.includes('@')) {
+    throw new Error('Une adresse email valide est requise pour réserver en ligne.');
+  }
+
   const timeInMinutes = timeToMinutes(payload.time);
   const bounds = getServiceBounds(normalizedDate);
   const isMidi = timeInMinutes >= bounds.midiStart && timeInMinutes <= bounds.midiEnd;
