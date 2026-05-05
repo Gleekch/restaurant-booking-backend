@@ -213,27 +213,12 @@ async function sendPendingEmailToClient(reservation) {
             <p style="color: #555; font-size: 16px; line-height: 1.6;">
               Nous avons bien reçu votre demande de réservation. Notre équipe va la vérifier et vous enverra une confirmation par email dans les meilleurs délais.
             </p>
-            <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 25px; border-radius: 10px; margin: 30px 0;">
-              <h3 style="color: #2c3e50; margin-top: 0; font-size: 18px; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📅 Votre demande</h3>
-              <table style="width: 100%; margin-top: 15px;">
-                <tr>
-                  <td style="padding: 8px 0; color: #666;"><strong>Date :</strong></td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${dateStr}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #666;"><strong>Heure :</strong></td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${reservation.time}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #666;"><strong>Nombre de convives :</strong></td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</td>
-                </tr>
-                ${reservation.specialRequests ? `
-                <tr>
-                  <td style="padding: 8px 0; color: #666; vertical-align: top;"><strong>Demandes spéciales :</strong></td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;"><em>${reservation.specialRequests}</em></td>
-                </tr>` : ''}
-              </table>
+            <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
+              <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Votre demande</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${dateStr}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${reservation.time}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
+              ${reservation.specialRequests ? `<p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Notes :</strong> ${reservation.specialRequests}</p>` : ''}
             </div>
             <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
               <p style="color: #8b6914; margin: 0; font-size: 14px;">
@@ -306,45 +291,12 @@ async function sendConfirmationEmailToClient(reservation) {
             </p>
             
             <!-- Détails de la réservation -->
-            <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 25px; border-radius: 10px; margin: 30px 0;">
-              <h3 style="color: #2c3e50; margin-top: 0; font-size: 18px; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📅 Détails de votre réservation</h3>
-              
-              <table style="width: 100%; margin-top: 15px;">
-                <tr>
-                  <td style="padding: 8px 0; color: #666;">
-                    <strong>Date :</strong>
-                  </td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">
-                    ${new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #666;">
-                    <strong>Heure :</strong>
-                  </td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">
-                    ${reservation.time}
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #666;">
-                    <strong>Nombre de convives :</strong>
-                  </td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">
-                    ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}
-                  </td>
-                </tr>
-                ${reservation.specialRequests ? `
-                <tr>
-                  <td style="padding: 8px 0; color: #666; vertical-align: top;">
-                    <strong>Demandes spéciales :</strong>
-                  </td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">
-                    <em>${reservation.specialRequests}</em>
-                  </td>
-                </tr>
-                ` : ''}
-              </table>
+            <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
+              <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Détails de votre réservation</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${reservation.time}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
+              ${reservation.specialRequests ? `<p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Notes :</strong> ${reservation.specialRequests}</p>` : ''}
             </div>
             
             <!-- Message de bienvenue -->
@@ -430,22 +382,11 @@ async function sendCancellationEmailToClient(reservation) {
             <p style="color: #555; font-size: 16px; line-height: 1.6;">
               Nous vous informons que votre réservation a été annulée. Nous sommes désolés pour la gêne occasionnée.
             </p>
-            <div style="background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); padding: 25px; border-radius: 10px; margin: 30px 0;">
-              <h3 style="color: #2c3e50; margin-top: 0; font-size: 18px; border-bottom: 2px solid #667eea; padding-bottom: 10px;">📅 Réservation annulée</h3>
-              <table style="width: 100%; margin-top: 15px;">
-                <tr>
-                  <td style="padding: 8px 0; color: #666;"><strong>Date :</strong></td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${dateStr}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #666;"><strong>Heure :</strong></td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${reservation.time}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; color: #666;"><strong>Nombre de convives :</strong></td>
-                  <td style="padding: 8px 0; color: #2c3e50; text-align: right;">${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</td>
-                </tr>
-              </table>
+            <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
+              <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Réservation annulée</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${dateStr}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${reservation.time}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
             </div>
             <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
               <p style="color: #8b6914; margin: 0; font-size: 14px;">
