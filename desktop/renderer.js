@@ -1190,6 +1190,9 @@ function renderOperationalDayView() {
                     </div>
                     ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
                     <div class="wave-recommended" id="wave-recommended-midi"></div>
+                    <div style="text-align:right; margin-top:8px;">
+                        <button class="btn-block-service" data-date="${selectedDate}" data-service="midi" style="font-size:11px; padding:4px 10px; border:1px solid #dc2626; background:transparent; color:#dc2626; border-radius:4px; cursor:pointer;">🔒 Marquer complet</button>
+                    </div>
                 </div>
             ` : ''}
             ${showSoir ? `
@@ -1203,6 +1206,9 @@ function renderOperationalDayView() {
                     </div>
                     ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
                     <div class="wave-recommended" id="wave-recommended-soir"></div>
+                    <div style="text-align:right; margin-top:8px;">
+                        <button class="btn-block-service" data-date="${selectedDate}" data-service="soir" style="font-size:11px; padding:4px 10px; border:1px solid #dc2626; background:transparent; color:#dc2626; border-radius:4px; cursor:pointer;">🔒 Marquer complet</button>
+                    </div>
                 </div>
             ` : ''}
         </div>
@@ -1226,9 +1232,32 @@ function renderOperationalDayView() {
         });
     }
 
-    reservationsContainer.querySelectorAll('[data-service]').forEach((element) => {
-        element.addEventListener('click', () => {
+    reservationsContainer.querySelectorAll('.service-summary-card').forEach((element) => {
+        element.addEventListener('click', (e) => {
+            if (e.target.closest('.btn-block-service')) return;
             openServiceDetail(element.dataset.date, element.dataset.service, 'today');
+        });
+    });
+
+    reservationsContainer.querySelectorAll('.btn-block-service').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const date = btn.dataset.date;
+            const service = btn.dataset.service;
+            try {
+                const check = await api.apiRequest(`/api/blocked-services?date=${date}`);
+                const isBlocked = (check.data || []).some(b => b.service === service || b.service === 'all');
+                if (isBlocked) {
+                    await api.apiRequest('/api/blocked-services', { method: 'DELETE', body: { date, service } });
+                    showNotification('Service débloqué', `Le service du ${service} est à nouveau ouvert.`);
+                } else {
+                    await api.apiRequest('/api/blocked-services', { method: 'POST', body: { date, service, reason: 'Complet' } });
+                    showNotification('Service bloqué', `Le service du ${service} est marqué complet sur le site.`);
+                }
+                displayReservations();
+            } catch (error) {
+                alert('Erreur : ' + error.message);
+            }
         });
     });
 }

@@ -254,30 +254,19 @@ router.get('/availability', async (req, res) => {
 
     const hasFullSlots = [...baseSlots.midi, ...baseSlots.soir].some(s => !s.available);
     const notice = hasFullSlots ? ONLINE_LIMIT_NOTICE : null;
+    const meta = { recommendationsEnabled: false, notice, blockedServices };
 
     if (!getConfig().recommendationsEnabled) {
-      return res.json({
-        success: true,
-        data: {
-          ...baseSlots,
-          meta: { recommendationsEnabled: false, notice }
-        }
-      });
+      return res.json({ success: true, data: { ...baseSlots, meta } });
     }
 
     try {
       const enriched = await getEnrichedAvailability(date, requestedPeople, baseSlots);
-      enriched.meta = { ...enriched.meta, notice };
+      enriched.meta = { ...enriched.meta, notice, blockedServices };
       return res.json({ success: true, data: enriched });
     } catch (enrichError) {
       console.error('slotStrategyService fallback:', enrichError.message);
-      return res.json({
-        success: true,
-        data: {
-          ...baseSlots,
-          meta: { recommendationsEnabled: false, notice }
-        }
-      });
+      return res.json({ success: true, data: { ...baseSlots, meta } });
     }
   } catch (error) {
     res.status(400).json({
