@@ -2,6 +2,7 @@
 const API_URL = window.location.origin;
 let reservations = [];
 let currentView = 'today';
+let blockedServicesCache = []; // services bloqués pour la date affichée
 
 const ONLINE_CAPACITY_LIMIT = 50;
 const WAVE_LIMIT = 25;
@@ -188,7 +189,7 @@ function renderView() {
 }
 
 // Render Today View (ou prochaine date avec des réservations si aujourd'hui est vide)
-function renderTodayView() {
+async function renderTodayView() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     let displayDate = today;
@@ -226,6 +227,7 @@ function renderTodayView() {
     const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const dateISO = displayDate.getFullYear() + '-' + String(displayDate.getMonth()+1).padStart(2,'0') + '-' + String(displayDate.getDate()).padStart(2,'0');
+    await loadBlockedServices(dateISO);
     const cutoffs = getWaveCutoffs(displayDate);
     const midiCutoffStr = toTimeStr(cutoffs.midiCutoffMin);
     const soirCutoffStr = toTimeStr(cutoffs.soirCutoffMin);
@@ -256,9 +258,9 @@ function renderTodayView() {
         </div>
 
         <div class="service-section">
-            <div class="service-header midi">
+            <div class="service-header midi" style="${isServiceBlocked('midi') ? 'opacity:0.6;' : ''}">
                 <span class="icon">☀️</span>
-                <h3>Service du Midi</h3>
+                <h3>Service du Midi ${isServiceBlocked('midi') ? '<span style="background:#dc2626;color:white;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h3>
                 <span class="service-count">${midi.length} rés. / ${midiCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
             </div>
             ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
@@ -272,9 +274,9 @@ function renderTodayView() {
         </div>
 
         <div class="service-section">
-            <div class="service-header soir">
+            <div class="service-header soir" style="${isServiceBlocked('soir') ? 'opacity:0.6;' : ''}">
                 <span class="icon">🌙</span>
-                <h3>Service du Soir</h3>
+                <h3>Service du Soir ${isServiceBlocked('soir') ? '<span style="background:#dc2626;color:white;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h3>
                 <span class="service-count">${soir.length} rés. / ${soirCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
             </div>
             ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
@@ -909,41 +911,49 @@ document.querySelectorAll('.modal').forEach(modal => {
 });
 
 // Blocage manuel de service
+async function loadBlockedServices(date) {
+    try {
+        const res = await apiFetch(`${API_URL}/api/blocked-services?date=${date}`);
+        const data = await res.json();
+        blockedServicesCache = (data.data || []).map(b => b.service);
+    } catch { blockedServicesCache = []; }
+}
+
+function isServiceBlocked(service) {
+    return blockedServicesCache.includes(service) || blockedServicesCache.includes('all');
+}
+
 async function toggleBlockService(date, service) {
-    const isBlocked = await isServiceBlocked(date, service);
-    if (isBlocked) {
+    if (isServiceBlocked(service)) {
         await apiFetch(`${API_URL}/api/blocked-services`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ date, service })
         });
-        showToast(`Service ${service} débloqué`, 'success');
+        showToast(`Service ${service} débloqué — réservations rouvertes`, 'success');
     } else {
         await apiFetch(`${API_URL}/api/blocked-services`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date, service })
+            body: JSON.stringify({ date, service, reason: 'Complet' })
         });
-        showToast(`Service ${service} marqué complet`, 'success');
+        showToast(`Service ${service} marqué complet sur le site`, 'success');
     }
+    await loadBlockedServices(date);
     renderTodayView();
-}
-
-async function isServiceBlocked(date, service) {
-    try {
-        const res = await apiFetch(`${API_URL}/api/blocked-services?date=${date}`);
-        const data = await res.json();
-        return (data.data || []).some(b => b.service === service || b.service === 'all');
-    } catch { return false; }
 }
 
 function attachBlockButtons() {
     document.querySelectorAll('.btn-block-service').forEach(btn => {
+        const service = btn.dataset.service;
+        const blocked = isServiceBlocked(service);
+        btn.textContent = blocked ? '🔓 Débloquer' : '🔒 Marquer complet';
+        btn.style.borderColor = blocked ? 'var(--success)' : 'var(--danger)';
+        btn.style.color = blocked ? 'var(--success-text)' : 'var(--danger-text)';
+
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            const date = btn.dataset.date;
-            const service = btn.dataset.service;
-            await toggleBlockService(date, service);
+            await toggleBlockService(btn.dataset.date, service);
         });
     });
 }
