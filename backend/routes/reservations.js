@@ -165,6 +165,21 @@ router.post('/', async (req, res) => {
     const { date, time } = req.body;
     const validation = validatePublicReservationPayload(req.body);
 
+    // Vérifier si le service est bloqué manuellement
+    const BlockedServiceModel = require('../models/BlockedService');
+    const { year: by, month: bm, day: bd } = parseDateInput(validation.normalizedDate);
+    const bStart = new Date(Date.UTC(by, bm - 1, bd, 0, 0, 0, 0));
+    const bEnd   = new Date(Date.UTC(by, bm - 1, bd, 23, 59, 59, 999));
+    const blockedEntries = await BlockedServiceModel.find({ date: { $gte: bStart, $lte: bEnd } });
+    const blockedSvcs = blockedEntries.map(b => b.service);
+    const requestedService = validation.isMidi ? 'midi' : 'soir';
+    if (blockedSvcs.includes('all') || blockedSvcs.includes(requestedService)) {
+      return res.status(400).json({
+        success: false,
+        message: `Le service du ${requestedService} est complet pour cette date. Pour toute demande, appelez-nous au ${RESTAURANT_PHONE_DISPLAY}.`
+      });
+    }
+
     // Vérification doublon : même téléphone + même date + statut actif
     const { startDate, endDate } = getDayRange(validation.normalizedDate);
     const existingBooking = await Reservation.findOne({
