@@ -234,7 +234,23 @@ router.get('/availability', async (req, res) => {
       });
     }
 
+    // Vérifier les blocages manuels
+    const BlockedService = require('../models/BlockedService');
+    const { year, month, day } = parseDateInput(date);
+    const dayStart = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+    const dayEnd   = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+    const blocked = await BlockedService.find({ date: { $gte: dayStart, $lte: dayEnd } });
+    const blockedServices = blocked.map(b => b.service);
+
     const baseSlots = await getAvailableSlots(date, requestedPeople, ONLINE_CAPACITY_LIMIT);
+
+    // Marquer les créneaux bloqués comme indisponibles
+    if (blockedServices.includes('all') || blockedServices.includes('midi')) {
+      baseSlots.midi = baseSlots.midi.map(s => ({ ...s, available: false }));
+    }
+    if (blockedServices.includes('all') || blockedServices.includes('soir')) {
+      baseSlots.soir = baseSlots.soir.map(s => ({ ...s, available: false }));
+    }
 
     const hasFullSlots = [...baseSlots.midi, ...baseSlots.soir].some(s => !s.available);
     const notice = hasFullSlots ? ONLINE_LIMIT_NOTICE : null;

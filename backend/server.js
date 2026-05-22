@@ -79,6 +79,9 @@ app.post('/api/reservations', reservationLimiter);
 // Les routes internes (GET list, POST /desktop, PUT, DELETE) sont protégées dans le router
 app.use('/api/reservations', require('./routes/reservations'));
 
+// Blocages manuels de services (GET public, POST/DELETE protégés dans le router)
+app.use('/api/blocked-services', require('./routes/blockedServices'));
+
 // Menu et WhatsApp — publics
 app.use('/api/menu', require('./routes/menu'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));

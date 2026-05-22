@@ -225,6 +225,7 @@ function renderTodayView() {
 
     const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
+    const dateISO = displayDate.getFullYear() + '-' + String(displayDate.getMonth()+1).padStart(2,'0') + '-' + String(displayDate.getDate()).padStart(2,'0');
     const cutoffs = getWaveCutoffs(displayDate);
     const midiCutoffStr = toTimeStr(cutoffs.midiCutoffMin);
     const soirCutoffStr = toTimeStr(cutoffs.soirCutoffMin);
@@ -261,6 +262,9 @@ function renderTodayView() {
                 <span class="service-count">${midi.length} rés. / ${midiCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
             </div>
             ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
+            <div style="text-align:right; margin: 8px 14px 0;">
+              <button class="btn-block-service" data-date="${dateISO}" data-service="midi" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">🔒 Marquer complet</button>
+            </div>
             ${midi.length === 0 ?
                 '<div class="empty-state"><p>Aucune réservation pour le midi</p></div>' :
                 `<div class="reservations-grid">${midi.sort((a, b) => a.time.localeCompare(b.time)).map(r => renderReservationCard(r)).join('')}</div>`
@@ -274,6 +278,9 @@ function renderTodayView() {
                 <span class="service-count">${soir.length} rés. / ${soirCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
             </div>
             ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
+            <div style="text-align:right; margin: 8px 14px 0;">
+              <button class="btn-block-service" data-date="${dateISO}" data-service="soir" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">🔒 Marquer complet</button>
+            </div>
             ${soir.length === 0 ?
                 '<div class="empty-state"><p>Aucune réservation pour le soir</p></div>' :
                 `<div class="reservations-grid">${soir.sort((a, b) => a.time.localeCompare(b.time)).map(r => renderReservationCard(r)).join('')}</div>`
@@ -282,6 +289,7 @@ function renderTodayView() {
     `;
 
     attachCardListeners();
+    attachBlockButtons();
 }
 
 // Render Pending View
@@ -899,6 +907,46 @@ document.querySelectorAll('.modal').forEach(modal => {
         }
     });
 });
+
+// Blocage manuel de service
+async function toggleBlockService(date, service) {
+    const isBlocked = await isServiceBlocked(date, service);
+    if (isBlocked) {
+        await apiFetch(`${API_URL}/api/blocked-services`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date, service })
+        });
+        showToast(`Service ${service} débloqué`, 'success');
+    } else {
+        await apiFetch(`${API_URL}/api/blocked-services`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ date, service })
+        });
+        showToast(`Service ${service} marqué complet`, 'success');
+    }
+    renderTodayView();
+}
+
+async function isServiceBlocked(date, service) {
+    try {
+        const res = await apiFetch(`${API_URL}/api/blocked-services?date=${date}`);
+        const data = await res.json();
+        return (data.data || []).some(b => b.service === service || b.service === 'all');
+    } catch { return false; }
+}
+
+function attachBlockButtons() {
+    document.querySelectorAll('.btn-block-service').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const date = btn.dataset.date;
+            const service = btn.dataset.service;
+            await toggleBlockService(date, service);
+        });
+    });
+}
 
 // Service Worker Registration for PWA
 if ('serviceWorker' in navigator) {
