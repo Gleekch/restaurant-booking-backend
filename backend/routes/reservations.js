@@ -469,32 +469,5 @@ router.delete('/:id', apiKey, async (req, res) => {
   }
 });
 
-// Route temporaire — renvoie les emails de confirmation aux réservations confirmées
-router.post('/admin/resend-confirmations', apiKey, async (req, res) => {
-  try {
-    const fiveDaysAgo = new Date();
-    fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
-
-    const reservations = await Reservation.find({
-      status: 'confirmed',
-      email: { $exists: true, $ne: '' },
-      date: { $gte: fiveDaysAgo }
-    });
-
-    const results = [];
-    for (const reservation of reservations) {
-      try {
-        await sendConfirmationEmailToClient(reservation);
-        results.push({ name: reservation.customerName, email: reservation.email, date: reservation.date, time: reservation.time, success: true });
-      } catch (err) {
-        results.push({ name: reservation.customerName, email: reservation.email, success: false, error: err.message });
-      }
-    }
-
-    res.json({ success: true, total: reservations.length, results });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
 
 module.exports = router;
