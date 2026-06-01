@@ -44,6 +44,11 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
 
+// ─── Webhook Stripe ───
+// DOIT être monté AVANT express.json() : la vérification de signature
+// Stripe exige le corps brut de la requête (le routeur applique express.raw).
+app.use('/api/webhooks', require('./routes/webhooks'));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -110,5 +115,5 @@ const { startReminderScheduler } = require('./services/reminderService');
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  startReminderScheduler();
+  startReminderScheduler(io);
 });

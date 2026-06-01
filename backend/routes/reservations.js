@@ -14,6 +14,44 @@ const {
   timeToMinutes
 } = require('../services/capacityService');
 const { apiKey } = require('../middleware/auth');
+const {
+  isDepositRequired,
+  computeDepositCents,
+  getDepositConfig,
+  createCheckoutSession,
+  refundDeposit
+} = require('../services/paymentService');
+
+const RESTAURANT_TIME_ZONE = process.env.RESTAURANT_TIME_ZONE || 'Indian/Reunion';
+
+// Décalage du fuseau du restaurant par rapport à UTC (minutes, à l'est).
+function getTimezoneOffsetMinutes(timeZone, date) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
+  const parts = {};
+  for (const part of dtf.formatToParts(date)) {
+    if (part.type !== 'literal') parts[part.type] = part.value;
+  }
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  return Math.round((asUtc - date.getTime()) / 60000);
+}
+
+// Instant UTC (ms) du début de la réservation (date = minuit UTC du jour + heure locale).
+function getReservationStartUtcMs(reservation) {
+  const dateMidnightUtc = new Date(reservation.date).getTime();
+  const [hours, minutes] = String(reservation.time).split(':').map(Number);
+  const localMinutes = (hours * 60) + minutes;
+  const offset = getTimezoneOffsetMinutes(RESTAURANT_TIME_ZONE, new Date(reservation.date));
+  return dateMidnightUtc + ((localMinutes - offset) * 60000);
+}
+
+function hoursUntilReservation(reservation) {
+  return (getReservationStartUtcMs(reservation) - Date.now()) / (60 * 60 * 1000);
+}
 
 const ONLINE_BOOKING_LIMIT = parseInt(process.env.ONLINE_BOOKING_LIMIT, 10) || 10;
 const ONLINE_CAPACITY_LIMIT = parseInt(process.env.ONLINE_CAPACITY, 10) || 50;
@@ -113,20 +151,23 @@ function validatePublicReservationPayload(payload) {
   };
 }
 
-async function createReservation(req, res) {
+async function createReservation(req, res, options = {}) {
+  const { notify = true } = options;
   const reservation = new Reservation(req.body);
   await reservation.save();
 
-  try {
-    await sendNotifications(reservation);
-    console.log('Notifications envoyees avec succes');
-  } catch (notificationError) {
-    console.error('Erreur envoi notifications:', notificationError);
-  }
+  if (notify) {
+    try {
+      await sendNotifications(reservation);
+      console.log('Notifications envoyees avec succes');
+    } catch (notificationError) {
+      console.error('Erreur envoi notifications:', notificationError);
+    }
 
-  const io = req.app.get('io');
-  console.log('Emission de new-reservation via Socket.IO pour:', reservation.customerName);
-  io.emit('new-reservation', reservation);
+    const io = req.app.get('io');
+    console.log('Emission de new-reservation via Socket.IO pour:', reservation.customerName);
+    io.emit('new-reservation', reservation);
+  }
 
   return reservation;
 }
@@ -162,6 +203,12 @@ router.post('/desktop', apiKey, async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
+    // Sécurité : ces champs ne doivent jamais venir du client (anti-spoofing
+    // d'un statut « payé » ou d'arrhes pour contourner le paiement).
+    delete req.body.status;
+    delete req.body.deposit;
+    req.body.source = 'website';
+
     const { date, time } = req.body;
     const validation = validatePublicReservationPayload(req.body);
 
@@ -185,7 +232,7 @@ router.post('/', async (req, res) => {
     const existingBooking = await Reservation.findOne({
       phoneNumber: req.body.phoneNumber,
       date: { $gte: startDate, $lt: endDate },
-      status: { $ne: 'cancelled' }
+      status: { $nin: ['cancelled', 'awaiting-payment'] }
     });
 
     if (existingBooking) {
@@ -203,6 +250,50 @@ router.post('/', async (req, res) => {
         success: false,
         message: `Ce créneau est complet en ligne pour le service du ${serviceName}. Afin de garantir un accueil soigné à chaque table et le bien-être de notre équipe, nous limitons le nombre de réservations en ligne. Vous pouvez choisir un autre créneau ou nous appeler au ${RESTAURANT_PHONE_DISPLAY} — il reste peut-être de la place !`
       });
+    }
+
+    // Groupes >= seuil : arrhes obligatoires avant de retenir la réservation.
+    if (isDepositRequired(validation.requestedPeople)) {
+      const config = getDepositConfig();
+      const amountCents = computeDepositCents(validation.requestedPeople);
+      const expiresAt = new Date(Date.now() + config.expiryMinutes * 60 * 1000);
+
+      // Création en attente de paiement : occupe déjà la place (status != cancelled).
+      req.body.status = 'awaiting-payment';
+      req.body.deposit = {
+        required: true,
+        amountCents,
+        perPersonCents: config.perPersonCents,
+        currency: config.currency,
+        status: 'awaiting',
+        expiresAt
+      };
+
+      const reservation = await createReservation(req, res, { notify: false });
+
+      try {
+        const session = await createCheckoutSession(reservation);
+        reservation.deposit.stripeSessionId = session.sessionId;
+        reservation.deposit.expiresAt = session.expiresAt;
+        await reservation.save();
+
+        return res.status(201).json({
+          success: true,
+          requiresPayment: true,
+          checkoutUrl: session.url,
+          message: 'Acompte requis pour confirmer la reservation',
+          data: reservation
+        });
+      } catch (paymentError) {
+        console.error('Erreur creation session de paiement:', paymentError);
+        reservation.status = 'cancelled';
+        reservation.deposit.status = 'failed';
+        await reservation.save();
+        return res.status(502).json({
+          success: false,
+          message: 'Le service de paiement est momentanement indisponible. Merci de reessayer ou d\'appeler le restaurant.'
+        });
+      }
     }
 
     const reservation = await createReservation(req, res);
@@ -429,16 +520,39 @@ router.put('/:id', apiKey, async (req, res) => {
   }
 });
 
+// Logique d'annulation partagée (admin + client) : rembourse les arrhes si
+// l'annulation a lieu suffisamment en avance, puis passe la résa en 'cancelled'.
+// Renvoie { refundMessage, refunded }.
+async function cancelReservationCore(reservation) {
+  let refundMessage = '';
+  let refunded = false;
+
+  if (reservation.deposit && reservation.deposit.status === 'paid') {
+    const config = getDepositConfig();
+    if (hoursUntilReservation(reservation) >= config.cancellationHours) {
+      try {
+        await refundDeposit(reservation);
+        reservation.deposit.status = 'refunded';
+        reservation.deposit.refundedAt = new Date();
+        refundMessage = ' Arrhes remboursees.';
+        refunded = true;
+      } catch (refundError) {
+        console.error('Erreur remboursement arrhes:', refundError);
+        refundMessage = ' (echec du remboursement automatique, a traiter manuellement)';
+      }
+    } else {
+      refundMessage = ' Arrhes conservees (annulation tardive).';
+    }
+  }
+
+  reservation.status = 'cancelled';
+  await reservation.save();
+  return { refundMessage, refunded };
+}
+
 router.delete('/:id', apiKey, async (req, res) => {
   try {
-    const existing = await Reservation.findById(req.params.id);
-    const wasNotCancelled = existing && existing.status !== 'cancelled';
-
-    const reservation = await Reservation.findByIdAndUpdate(
-      req.params.id,
-      { status: 'cancelled' },
-      { new: true }
-    );
+    const reservation = await Reservation.findById(req.params.id);
 
     if (!reservation) {
       return res.status(404).json({
@@ -446,6 +560,9 @@ router.delete('/:id', apiKey, async (req, res) => {
         message: 'Reservation non trouvee'
       });
     }
+
+    const wasNotCancelled = reservation.status !== 'cancelled';
+    const { refundMessage } = await cancelReservationCore(reservation);
 
     if (wasNotCancelled && reservation.email) {
       sendCancellationEmailToClient(reservation).catch(err =>
@@ -458,7 +575,7 @@ router.delete('/:id', apiKey, async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Reservation annulee',
+      message: `Reservation annulee.${refundMessage}`,
       data: reservation
     });
   } catch (error) {
@@ -466,6 +583,133 @@ router.delete('/:id', apiKey, async (req, res) => {
       success: false,
       message: error.message
     });
+  }
+});
+
+// Résumé public d'une réservation (page d'annulation client), protégé par le jeton.
+router.get('/:id/public', async (req, res) => {
+  try {
+    const { token } = req.query;
+    const reservation = await Reservation.findById(req.params.id);
+
+    if (!reservation || !token || token !== reservation.cancellationToken) {
+      return res.status(404).json({ success: false, message: 'Reservation introuvable ou lien invalide' });
+    }
+
+    const config = getDepositConfig();
+    res.json({
+      success: true,
+      data: {
+        customerName: reservation.customerName,
+        date: reservation.date,
+        time: reservation.time,
+        numberOfPeople: reservation.numberOfPeople,
+        status: reservation.status,
+        deposit: {
+          required: reservation.deposit.required,
+          amountCents: reservation.deposit.amountCents,
+          currency: reservation.deposit.currency,
+          status: reservation.deposit.status
+        },
+        cancellationHours: config.cancellationHours,
+        refundableNow: reservation.deposit.status === 'paid'
+          && hoursUntilReservation(reservation) >= config.cancellationHours
+      }
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Annulation par le client via son jeton secret (pas d'API key).
+router.post('/:id/cancel', async (req, res) => {
+  try {
+    const token = req.body && req.body.token;
+    const reservation = await Reservation.findById(req.params.id);
+
+    if (!reservation || !token || token !== reservation.cancellationToken) {
+      return res.status(404).json({ success: false, message: 'Reservation introuvable ou lien invalide' });
+    }
+
+    if (reservation.status === 'cancelled') {
+      return res.json({ success: true, alreadyCancelled: true, message: 'Cette reservation est deja annulee.' });
+    }
+
+    if (reservation.status === 'completed') {
+      return res.status(400).json({ success: false, message: 'Cette reservation ne peut plus etre annulee.' });
+    }
+
+    const { refundMessage, refunded } = await cancelReservationCore(reservation);
+
+    if (reservation.email) {
+      sendCancellationEmailToClient(reservation).catch(err =>
+        console.error('Erreur email annulation client:', err.message)
+      );
+    }
+
+    const io = req.app.get('io');
+    io.emit('cancel-reservation', reservation);
+
+    res.json({
+      success: true,
+      refunded,
+      message: `Votre reservation a bien ete annulee.${refundMessage}`
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Remboursement manuel des arrhes (override staff)
+router.post('/:id/deposit/refund', apiKey, async (req, res) => {
+  try {
+    const reservation = await Reservation.findById(req.params.id);
+
+    if (!reservation) {
+      return res.status(404).json({ success: false, message: 'Reservation non trouvee' });
+    }
+
+    if (!reservation.deposit || reservation.deposit.status !== 'paid') {
+      return res.status(400).json({ success: false, message: 'Aucune arrhe remboursable pour cette reservation' });
+    }
+
+    await refundDeposit(reservation);
+    reservation.deposit.status = 'refunded';
+    reservation.deposit.refundedAt = new Date();
+    await reservation.save();
+
+    const io = req.app.get('io');
+    io.emit('update-reservation', reservation);
+
+    res.json({ success: true, message: 'Arrhes remboursees', data: reservation });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Marque les arrhes comme deduites de l'addition (comptabilite, aucun mouvement d'argent)
+router.post('/:id/deposit/deducted', apiKey, async (req, res) => {
+  try {
+    const reservation = await Reservation.findById(req.params.id);
+
+    if (!reservation) {
+      return res.status(404).json({ success: false, message: 'Reservation non trouvee' });
+    }
+
+    if (!reservation.deposit || reservation.deposit.status !== 'paid') {
+      return res.status(400).json({ success: false, message: 'Les arrhes doivent etre payees pour etre deduites' });
+    }
+
+    reservation.deposit.status = 'deducted';
+    reservation.deposit.deductedAt = new Date();
+    await reservation.save();
+
+    const io = req.app.get('io');
+    io.emit('update-reservation', reservation);
+
+    res.json({ success: true, message: 'Arrhes marquees comme deduites de l\'addition', data: reservation });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
   }
 });
 

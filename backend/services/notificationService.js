@@ -3,6 +3,39 @@ const nodemailer = require('nodemailer');
 // SMS désactivé - Twilio non utilisé
 let twilioClient = null;
 
+const { formatAmount } = require('./paymentService');
+
+// Renvoie true si la réservation comporte des arrhes payées
+function hasPaidDeposit(reservation) {
+  return reservation.deposit && reservation.deposit.status === 'paid';
+}
+
+// Lien personnel d'annulation en ligne (jeton secret par réservation)
+function buildCancelUrl(reservation) {
+  const siteUrl = (process.env.PUBLIC_SITE_URL || 'https://www.aumurmuredesflots.com').replace(/\/+$/, '');
+  return `${siteUrl}/annuler?id=${reservation._id}&token=${reservation.cancellationToken}`;
+}
+
+// Bloc HTML « arrhes payées » (vide si pas d'arrhes)
+function depositBlockHtml(reservation) {
+  if (!hasPaidDeposit(reservation)) return '';
+  const cancellationHours = parseInt(process.env.DEPOSIT_CANCELLATION_HOURS, 10) || 24;
+  return `
+            <div style="background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 18px; margin: 25px 0; border-radius: 5px;">
+              <p style="color: #2e7d32; margin: 0 0 6px 0; font-size: 15px;"><strong>✓ Arrhes reçues : ${formatAmount(reservation.deposit.amountCents, reservation.deposit.currency)}</strong></p>
+              <p style="color: #555; margin: 0; font-size: 13px; line-height: 1.5;">Ce montant sera <strong>déduit de votre addition</strong>. Il vous est intégralement remboursé en cas d'annulation au moins ${cancellationHours}h avant votre venue.</p>
+            </div>`;
+}
+
+// Bloc HTML « Annuler ma réservation »
+function cancelBlockHtml(reservation) {
+  return `
+            <div style="text-align: center; margin: 25px 0; padding: 18px; background-color: #fafaf7; border: 1px solid #e7e5df; border-radius: 8px;">
+              <p style="color: #666; font-size: 13px; margin: 0 0 12px 0;">Un imprévu ? Vous pouvez annuler votre réservation en ligne.</p>
+              <a href="${buildCancelUrl(reservation)}" style="display: inline-block; background-color: #78716c; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-size: 13px;">Annuler ma réservation</a>
+            </div>`;
+}
+
 // Configuration Email
 const emailPort = parseInt(process.env.EMAIL_PORT) || 465;
 const emailTransporter = nodemailer.createTransport({
@@ -140,6 +173,14 @@ async function sendEmail(message, reservation) {
                     ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}
                   </td>
                 </tr>
+                ${hasPaidDeposit(reservation) ? `
+                <tr>
+                  <td style="padding: 8px 0;"><strong>Arrhes :</strong></td>
+                  <td style="text-align: right; font-size: 18px; color: #2e7d32;">
+                    ${formatAmount(reservation.deposit.amountCents, reservation.deposit.currency)} payées ✓
+                  </td>
+                </tr>
+                ` : ''}
               </table>
             </div>
             
@@ -226,6 +267,8 @@ async function sendPendingEmailToClient(reservation) {
                 Vous recevrez un second email dès que notre équipe aura validé votre réservation. En cas de besoin, n'hésitez pas à nous appeler au 02 62 26 67 19.
               </p>
             </div>
+            ${depositBlockHtml(reservation)}
+            ${cancelBlockHtml(reservation)}
             <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e0e0e0;">
               <p style="color: #666; font-size: 14px; margin: 5px 0;">📞 02 62 26 67 19</p>
               <p style="color: #666; font-size: 14px; margin: 5px 0;">📧 aumurmuredesflots@gmail.com</p>
@@ -308,6 +351,9 @@ async function sendConfirmationEmailToClient(reservation) {
               </p>
             </div>
             
+            ${depositBlockHtml(reservation)}
+            ${cancelBlockHtml(reservation)}
+
             <!-- Contact -->
             <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e0e0e0;">
               <p style="color: #666; font-size: 14px; margin: 5px 0;">

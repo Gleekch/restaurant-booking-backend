@@ -473,25 +473,58 @@ function showDayDetail(dateISO) {
 }
 
 // Render Reservation Card
-function renderReservationCard(r) {
-    const statusText = {
-        'pending': 'En attente',
-        'confirmed': 'Confirmé',
-        'cancelled': 'Annulé'
-    };
+const STATUS_TEXT = {
+    'awaiting-payment': 'Paiement en attente',
+    'pending': 'En attente',
+    'confirmed': 'Confirmé',
+    'cancelled': 'Annulé',
+    'completed': 'Terminé'
+};
 
+function formatEuros(cents) {
+    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((cents || 0) / 100);
+}
+
+function depositBadge(r) {
+    const d = r.deposit;
+    if (!d || !d.required) return '';
+    const amount = formatEuros(d.amountCents);
+    const map = {
+        awaiting: `<span class="deposit-badge awaiting">⏳ Arrhes non payées</span>`,
+        paid:     `<span class="deposit-badge paid">💶 Arrhes ${amount} payées</span>`,
+        deducted: `<span class="deposit-badge deducted">✓ Arrhes déduites (${amount})</span>`,
+        refunded: `<span class="deposit-badge refunded">↩ Arrhes remboursées</span>`,
+        failed:   `<span class="deposit-badge failed">⚠ Paiement non abouti</span>`
+    };
+    return map[d.status] || '';
+}
+
+function depositActions(r) {
+    const d = r.deposit;
+    if (!d || d.status !== 'paid') return '';
+    return `
+        <div class="deposit-actions">
+            <button class="btn-deposit-deduct" onclick="markDepositDeducted('${r._id}')">Déduire de l'addition</button>
+            <button class="btn-deposit-refund" onclick="refundDepositReservation('${r._id}')">Rembourser</button>
+        </div>`;
+}
+
+function renderReservationCard(r) {
+    const badge = depositBadge(r);
     return `
         <div class="reservation-card status-${r.status}" data-id="${r._id}">
             <div class="card-header">
                 <span class="card-time">${r.time}</span>
-                <span class="card-status ${r.status}">${statusText[r.status]}</span>
+                <span class="card-status ${r.status}">${STATUS_TEXT[r.status] || r.status}</span>
             </div>
             <div class="card-name">${r.customerName}</div>
             <div class="card-info">
                 <span><span class="icon">👥</span> ${r.numberOfPeople}</span>
                 <span><span class="icon">📱</span> ${r.phoneNumber}</span>
             </div>
+            ${badge ? `<div class="card-deposit">${badge}</div>` : ''}
             ${r.specialRequests ? `<div class="card-notes"><span class="icon">💬</span> ${r.specialRequests}</div>` : ''}
+            ${depositActions(r)}
         </div>
     `;
 }
@@ -512,6 +545,7 @@ function renderPendingCard(r) {
                 <p><span class="icon">📅</span> ${dateStr} - ${r.time} ${service}</p>
                 <p><span class="icon">👥</span> ${r.numberOfPeople} personne(s)</p>
                 <p><span class="icon">📱</span> ${r.phoneNumber}</p>
+                ${depositBadge(r) ? `<p>${depositBadge(r)}</p>` : ''}
                 ${r.specialRequests ? `<p><span class="icon">💬</span> ${r.specialRequests}</p>` : ''}
             </div>
             <div class="pending-actions">
@@ -801,6 +835,32 @@ async function updateStatus(id, status) {
         if (!response.ok) throw new Error('Erreur');
 
         showToast(status === 'confirmed' ? 'Réservation confirmée' : 'Réservation annulée', 'success');
+        loadReservations();
+    } catch (error) {
+        showToast('Erreur lors de la mise à jour', 'error');
+    }
+}
+
+// Rembourser les arrhes
+async function refundDepositReservation(id) {
+    if (!confirm('Rembourser les arrhes de cette réservation ?')) return;
+    try {
+        const response = await apiFetch(`${API_URL}/api/reservations/${id}/deposit/refund`, { method: 'POST' });
+        if (!response.ok) throw new Error('Erreur');
+        showToast('Arrhes remboursées', 'success');
+        loadReservations();
+    } catch (error) {
+        showToast('Erreur lors du remboursement', 'error');
+    }
+}
+
+// Marquer les arrhes comme déduites de l'addition
+async function markDepositDeducted(id) {
+    if (!confirm('Marquer les arrhes comme déduites de l\'addition ?')) return;
+    try {
+        const response = await apiFetch(`${API_URL}/api/reservations/${id}/deposit/deducted`, { method: 'POST' });
+        if (!response.ok) throw new Error('Erreur');
+        showToast('Arrhes déduites de l\'addition', 'success');
         loadReservations();
     } catch (error) {
         showToast('Erreur lors de la mise à jour', 'error');

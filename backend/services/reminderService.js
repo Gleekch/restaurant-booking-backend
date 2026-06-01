@@ -6,6 +6,13 @@
 
 const nodemailer = require('nodemailer');
 const Reservation = require('../models/Reservation');
+const { formatAmount } = require('./paymentService');
+
+// Lien personnel d'annulation en ligne (jeton secret par réservation)
+function buildCancelUrl(reservation) {
+  const siteUrl = (process.env.PUBLIC_SITE_URL || 'https://www.aumurmuredesflots.com').replace(/\/+$/, '');
+  return `${siteUrl}/annuler?id=${reservation._id}&token=${reservation.cancellationToken}`;
+}
 
 const emailPort = parseInt(process.env.EMAIL_PORT) || 465;
 const emailTransporter = nodemailer.createTransport({
@@ -53,11 +60,13 @@ async function sendReminderEmail(reservation) {
               <p style="margin:0 0 8px; color:#1c1917; font-size:15px;"><strong>${dateStr}</strong></p>
               <p style="margin:0 0 8px; color:#1c1917; font-size:15px;">Heure : <strong>${reservation.time}</strong></p>
               <p style="margin:0 0 8px; color:#1c1917; font-size:15px;">Personnes : <strong>${reservation.numberOfPeople}</strong></p>
+              ${reservation.deposit && reservation.deposit.status === 'paid' ? `<p style="margin:0 0 8px; color:#166534; font-size:14px;">Arrhes payées : <strong>${formatAmount(reservation.deposit.amountCents, reservation.deposit.currency)}</strong> (déduites de l'addition)</p>` : ''}
               ${reservation.specialRequests ? `<p style="margin:0; color:#78716c; font-size:14px; font-style:italic;">${reservation.specialRequests}</p>` : ''}
             </div>
             <p style="color:#78716c; font-size:14px; line-height:1.6;">
               Si vous souhaitez modifier ou annuler, contactez-nous au
-              <a href="tel:${process.env.RESTAURANT_PHONE || '0262266719'}" style="color:#1c1917;">${process.env.RESTAURANT_PHONE || '0262266719'}</a>.
+              <a href="tel:${process.env.RESTAURANT_PHONE || '0262266719'}" style="color:#1c1917;">${process.env.RESTAURANT_PHONE || '0262266719'}</a>,
+              ou <a href="${buildCancelUrl(reservation)}" style="color:#1c1917;">annulez en ligne</a>.
             </p>
             <p style="color:#78716c; font-size:14px; margin-top:20px;">
               À demain !<br>
@@ -122,19 +131,54 @@ async function processReminders() {
 }
 
 /**
- * Démarre le scheduler de rappels
- * Vérifie toutes les heures s'il y a des rappels à envoyer
+ * Filet de sécurité : annule les réservations restées en attente de paiement
+ * dont le délai d'acompte est dépassé (si un webhook Stripe a été manqué).
+ * @param {object} io - instance Socket.IO (optionnelle) pour notifier le dashboard
  */
-function startReminderScheduler() {
-  console.log('Scheduler de rappels démarré (vérification toutes les heures)');
+async function sweepExpiredDeposits(io) {
+  const now = new Date();
+  const stale = await Reservation.find({
+    status: 'awaiting-payment',
+    'deposit.expiresAt': { $ne: null, $lt: now }
+  });
 
-  // Vérifier immédiatement au démarrage
-  processReminders().catch(err => console.error('Erreur scheduler rappels:', err.message));
+  let cancelled = 0;
+  for (const reservation of stale) {
+    try {
+      reservation.status = 'cancelled';
+      reservation.deposit.status = 'failed';
+      await reservation.save();
+      if (io) io.emit('cancel-reservation', reservation);
+      cancelled++;
+    } catch (error) {
+      console.error(`Erreur annulation acompte expiré (${reservation._id}):`, error.message);
+    }
+  }
 
-  // Puis toutes les heures
-  setInterval(() => {
-    processReminders().catch(err => console.error('Erreur scheduler rappels:', err.message));
-  }, 60 * 60 * 1000); // 1 heure
+  if (cancelled > 0) {
+    console.log(`Acomptes expirés: ${cancelled} réservation(s) annulée(s)`);
+  }
+  return cancelled;
 }
 
-module.exports = { processReminders, startReminderScheduler };
+/**
+ * Démarre le scheduler de rappels
+ * Vérifie toutes les heures s'il y a des rappels à envoyer
+ * @param {object} io - instance Socket.IO (optionnelle) pour les annulations d'acomptes expirés
+ */
+function startReminderScheduler(io) {
+  console.log('Scheduler de rappels démarré (vérification toutes les heures)');
+
+  const tick = () => {
+    processReminders().catch(err => console.error('Erreur scheduler rappels:', err.message));
+    sweepExpiredDeposits(io).catch(err => console.error('Erreur balayage acomptes:', err.message));
+  };
+
+  // Vérifier immédiatement au démarrage
+  tick();
+
+  // Puis toutes les heures
+  setInterval(tick, 60 * 60 * 1000); // 1 heure
+}
+
+module.exports = { processReminders, sweepExpiredDeposits, startReminderScheduler };

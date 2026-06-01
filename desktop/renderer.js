@@ -494,6 +494,12 @@ function createReservationCard(reservation) {
                 <span class="info-label">Personnes:</span>
                 ${reservation.numberOfPeople}
             </div>
+            ${getDepositText(reservation) ? `
+            <div class="info-row">
+                <span class="info-label">Arrhes:</span>
+                ${getDepositText(reservation)}
+            </div>
+            ` : ''}
             ${reservation.specialRequests ? `
             <div class="info-row">
                 <span class="info-label">Notes:</span>
@@ -502,7 +508,7 @@ function createReservationCard(reservation) {
             ` : ''}
         </div>
     `;
-    
+
     card.addEventListener('click', () => showReservationDetails(reservation));
     return card;
 }
@@ -510,12 +516,28 @@ function createReservationCard(reservation) {
 // Obtenir le texte du statut
 function getStatusText(status) {
     const statusTexts = {
+        'awaiting-payment': 'Paiement en attente',
         pending: 'En attente',
         confirmed: 'Confirmée',
         cancelled: 'Annulée',
         completed: 'Terminée'
     };
     return statusTexts[status] || status;
+}
+
+// Texte d'état des arrhes (vide si pas d'arrhes)
+function getDepositText(reservation) {
+    const d = reservation.deposit;
+    if (!d || !d.required) return '';
+    const amount = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((d.amountCents || 0) / 100);
+    const labels = {
+        awaiting: '⏳ non payées',
+        paid: `💶 ${amount} payées`,
+        deducted: `✓ déduites (${amount})`,
+        refunded: '↩ remboursées',
+        failed: '⚠ non abouti'
+    };
+    return labels[d.status] || '';
 }
 
 // Afficher les détails de la réservation

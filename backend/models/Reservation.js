@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const crypto = require('crypto');
 
 const reservationSchema = new mongoose.Schema({
   customerName: {
@@ -37,8 +38,25 @@ const reservationSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'cancelled', 'completed'],
+    enum: ['awaiting-payment', 'pending', 'confirmed', 'cancelled', 'completed'],
     default: 'pending'
+  },
+  deposit: {
+    required: { type: Boolean, default: false },
+    amountCents: { type: Number, default: 0 },
+    perPersonCents: { type: Number, default: 0 },
+    currency: { type: String, default: 'eur' },
+    status: {
+      type: String,
+      enum: ['none', 'awaiting', 'paid', 'refunded', 'deducted', 'failed'],
+      default: 'none'
+    },
+    stripeSessionId: { type: String, default: null },
+    stripePaymentIntentId: { type: String, default: null },
+    paidAt: { type: Date, default: null },
+    refundedAt: { type: Date, default: null },
+    deductedAt: { type: Date, default: null },
+    expiresAt: { type: Date, default: null }
   },
   table: {
     type: String,
@@ -51,6 +69,10 @@ const reservationSchema = new mongoose.Schema({
   reminder24hSentAt: {
     type: Date,
     default: null
+  },
+  cancellationToken: {
+    type: String,
+    default: () => crypto.randomBytes(24).toString('hex')
   },
   createdAt: {
     type: Date,
