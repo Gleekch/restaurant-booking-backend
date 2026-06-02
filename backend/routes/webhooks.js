@@ -39,13 +39,13 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
       const reservation = reservationId ? await Reservation.findById(reservationId) : null;
 
       if (reservation && reservation.status === 'awaiting-payment') {
+        // Flux normal : réservation en ligne → paiement confirme la résa
         reservation.deposit.status = 'paid';
         reservation.deposit.stripePaymentIntentId = session.payment_intent || null;
         reservation.deposit.paidAt = new Date();
         reservation.status = 'confirmed';
         await reservation.save();
 
-        // Notif restaurant + email de confirmation directe au client (arrhes payées = confirmé)
         if (process.env.EMAIL_USER) {
           sendEmail(formatReservationMessage(reservation), reservation).catch(err =>
             console.error('Erreur email restaurant post-paiement:', err.message)
@@ -59,6 +59,23 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
 
         if (io) io.emit('new-reservation', reservation);
         console.log(`Arrhes payees, reservation confirmee pour ${reservation.customerName} (${reservation._id})`);
+
+      } else if (reservation && reservation.deposit && reservation.deposit.status === 'awaiting') {
+        // Flux admin "Demander les arrhes" : la résa existe déjà (pending/confirmed)
+        // On enregistre le paiement sans changer le statut de la réservation
+        reservation.deposit.status = 'paid';
+        reservation.deposit.stripePaymentIntentId = session.payment_intent || null;
+        reservation.deposit.paidAt = new Date();
+        await reservation.save();
+
+        if (process.env.EMAIL_USER) {
+          sendEmail(formatReservationMessage(reservation), reservation).catch(err =>
+            console.error('Erreur email restaurant arrhes admin:', err.message)
+          );
+        }
+
+        if (io) io.emit('update-reservation', reservation);
+        console.log(`Arrhes admin payees pour ${reservation.customerName} (${reservation._id})`);
       }
     } else if (event.type === 'checkout.session.expired') {
       const session = event.data.object;
@@ -66,6 +83,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
       const reservation = reservationId ? await Reservation.findById(reservationId) : null;
 
       if (reservation && reservation.status === 'awaiting-payment') {
+        // Flux normal : réservation non confirmée → annulation
         reservation.status = 'cancelled';
         reservation.deposit.status = 'failed';
         await reservation.save();
@@ -76,6 +94,18 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
           );
         }
         console.log(`Session expiree, reservation annulee (${reservation._id})`);
+
+      } else if (reservation && reservation.deposit && reservation.deposit.status === 'awaiting') {
+        // Flux admin : le lien a expiré mais la résa reste active → on remet juste le dépôt à 'failed'
+        reservation.deposit.status = 'failed';
+        await reservation.save();
+        if (io) io.emit('update-reservation', reservation);
+        if (reservation.email) {
+          sendDepositExpiredEmailToClient(reservation).catch(err =>
+            console.error('Erreur email expiration lien admin:', err.message)
+          );
+        }
+        console.log(`Lien arrhes admin expire, reservation conservee (${reservation._id})`);
       }
     }
   } catch (error) {

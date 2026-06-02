@@ -138,13 +138,15 @@ async function processReminders() {
  */
 async function sweepExpiredDeposits(io) {
   const now = new Date();
-  const stale = await Reservation.find({
+
+  // Cas 1 : réservations en attente de paiement (flux normal) → annuler
+  const staleAwaitingPayment = await Reservation.find({
     status: 'awaiting-payment',
     'deposit.expiresAt': { $ne: null, $lt: now }
   });
 
   let cancelled = 0;
-  for (const reservation of stale) {
+  for (const reservation of staleAwaitingPayment) {
     try {
       reservation.status = 'cancelled';
       reservation.deposit.status = 'failed';
@@ -161,10 +163,28 @@ async function sweepExpiredDeposits(io) {
     }
   }
 
-  if (cancelled > 0) {
-    console.log(`Acomptes expirés: ${cancelled} réservation(s) annulée(s)`);
+  // Cas 2 : lien admin expiré sur une résa existante → remettre deposit.failed sans annuler
+  const staleAdminRequest = await Reservation.find({
+    status: { $in: ['pending', 'confirmed'] },
+    'deposit.status': 'awaiting',
+    'deposit.expiresAt': { $ne: null, $lt: now }
+  });
+
+  let resetDeposits = 0;
+  for (const reservation of staleAdminRequest) {
+    try {
+      reservation.deposit.status = 'failed';
+      await reservation.save();
+      if (io) io.emit('update-reservation', reservation);
+      resetDeposits++;
+    } catch (error) {
+      console.error(`Erreur reset lien arrhes expiré (${reservation._id}):`, error.message);
+    }
   }
-  return cancelled;
+
+  if (cancelled > 0) console.log(`Acomptes expirés: ${cancelled} réservation(s) annulée(s)`);
+  if (resetDeposits > 0) console.log(`Liens arrhes admin expirés: ${resetDeposits} remis à zéro`);
+  return { cancelled, resetDeposits };
 }
 
 /**
