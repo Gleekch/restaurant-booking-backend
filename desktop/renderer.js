@@ -580,7 +580,36 @@ function showReservationDetails(reservation) {
         editReservation(reservation);
     };
     
+    // Bouton "Demander les arrhes" : visible si résa active, email présent, arrhes non payées
+    const depositRequestBtn = document.getElementById('deposit-request-btn');
+    depositRequestBtn.replaceWith(depositRequestBtn.cloneNode(true));
+    const newDepositBtn = document.getElementById('deposit-request-btn');
+    const canRequestDeposit = reservation.email
+        && ['pending', 'confirmed'].includes(reservation.status)
+        && (!reservation.deposit || reservation.deposit.status === 'none' || reservation.deposit.status === 'failed');
+    newDepositBtn.style.display = canRequestDeposit ? 'inline-flex' : 'none';
+    if (canRequestDeposit) {
+        newDepositBtn.onclick = () => requestDepositDesktop(reservation._id);
+    }
+
     modal.style.display = 'block';
+}
+
+// Demander les arrhes depuis le desktop
+async function requestDepositDesktop(id) {
+    if (!confirm('Envoyer un lien de paiement des arrhes par email au client ?')) return;
+    try {
+        const data = await api.apiRequest(`/api/reservations/${id}/deposit/request`, { method: 'POST' });
+        if (data.success) {
+            modal.style.display = 'none';
+            await loadReservations();
+            showNotification('Succès', 'Lien de paiement envoyé au client');
+        } else {
+            alert(`Erreur : ${data.message}`);
+        }
+    } catch (error) {
+        alert(`Erreur lors de l'envoi : ${error.message}`);
+    }
 }
 
 // Mettre à jour le statut de la réservation
