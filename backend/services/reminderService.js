@@ -188,6 +188,44 @@ async function sweepExpiredDeposits(io) {
 }
 
 /**
+ * Conformité RGPD : anonymise les données personnelles des réservations
+ * de plus de RGPD_RETENTION_MONTHS mois (défaut 13). On conserve les données
+ * non identifiantes (date, couverts, statut, arrhes) pour les statistiques.
+ */
+async function anonymizeOldReservations() {
+  const retentionMonths = parseInt(process.env.RGPD_RETENTION_MONTHS, 10) || 13;
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - retentionMonths);
+
+  const old = await Reservation.find({
+    date: { $lt: cutoff },
+    anonymizedAt: null
+  });
+
+  let anonymized = 0;
+  for (const reservation of old) {
+    try {
+      reservation.customerName = 'Client anonymisé';
+      reservation.phoneNumber = 'anonymisé';
+      reservation.email = undefined;
+      reservation.specialRequests = '';
+      reservation.notes = '';
+      reservation.cancellationToken = null;
+      reservation.anonymizedAt = new Date();
+      await reservation.save();
+      anonymized++;
+    } catch (error) {
+      console.error(`Erreur anonymisation (${reservation._id}):`, error.message);
+    }
+  }
+
+  if (anonymized > 0) {
+    console.log(`RGPD: ${anonymized} réservation(s) de plus de ${retentionMonths} mois anonymisée(s)`);
+  }
+  return anonymized;
+}
+
+/**
  * Démarre le scheduler de rappels
  * Vérifie toutes les heures s'il y a des rappels à envoyer
  * @param {object} io - instance Socket.IO (optionnelle) pour les annulations d'acomptes expirés
@@ -195,9 +233,15 @@ async function sweepExpiredDeposits(io) {
 function startReminderScheduler(io) {
   console.log('Scheduler de rappels démarré (vérification toutes les heures)');
 
+  let hourCount = 0;
   const tick = () => {
     processReminders().catch(err => console.error('Erreur scheduler rappels:', err.message));
     sweepExpiredDeposits(io).catch(err => console.error('Erreur balayage acomptes:', err.message));
+    // Anonymisation RGPD une fois par jour (au démarrage puis toutes les 24 itérations)
+    if (hourCount % 24 === 0) {
+      anonymizeOldReservations().catch(err => console.error('Erreur anonymisation RGPD:', err.message));
+    }
+    hourCount++;
   };
 
   // Vérifier immédiatement au démarrage
@@ -207,4 +251,4 @@ function startReminderScheduler(io) {
   setInterval(tick, 60 * 60 * 1000); // 1 heure
 }
 
-module.exports = { processReminders, sweepExpiredDeposits, startReminderScheduler };
+module.exports = { processReminders, sweepExpiredDeposits, anonymizeOldReservations, startReminderScheduler };

@@ -74,6 +74,10 @@ const reservationSchema = new mongoose.Schema({
     type: String,
     default: () => crypto.randomBytes(24).toString('hex')
   },
+  anonymizedAt: {
+    type: Date,
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now
