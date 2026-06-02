@@ -465,10 +465,149 @@ async function sendCancellationEmailToClient(reservation) {
   }
 }
 
+// Email envoyé quand le paiement des arrhes expire sans avoir été finalisé
+async function sendDepositExpiredEmailToClient(reservation) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !reservation.email) return;
+
+  const dateStr = new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const phoneDisplay = process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19';
+  const siteUrl = (process.env.PUBLIC_SITE_URL || 'https://www.aumurmuredesflots.com').replace(/\/+$/, '');
+
+  const mailOptions = {
+    from: `"Au Murmure des Flots 🌊" <${process.env.EMAIL_USER}>`,
+    to: reservation.email,
+    subject: `Réservation non confirmée — paiement non finalisé`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+      <body style="margin: 0; padding: 0; font-family: 'Georgia', serif; background-color: #f5f5f5;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 20px; text-align: center;">
+            <img src="https://raw.githubusercontent.com/Gleekch/restaurant-booking-backend/main/assets/logo.png" alt="Au Murmure des Flots" style="width: 120px; height: 120px; border-radius: 50%; background: white; padding: 10px; margin: 0 auto 20px; display: block;">
+            <h1 style="color: white; margin: 0; font-size: 28px; font-weight: 300;">Au Murmure des Flots</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px; font-style: italic;">Restaurant Bistronomique</p>
+          </div>
+          <div style="padding: 40px 30px;">
+            <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Réservation non confirmée</h2>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${reservation.customerName},</p>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">
+              Votre demande de réservation pour <strong>${dateStr} à ${reservation.time}</strong> (${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}) n'a pas pu être confirmée car le paiement des arrhes n'a pas été finalisé dans le délai imparti.
+            </p>
+            <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
+              <p style="color: #8b6914; margin: 0; font-size: 14px;">
+                <strong>Vous souhaitez tout de même réserver ?</strong><br>
+                Effectuez une nouvelle réservation sur notre site ou appelez-nous directement au ${phoneDisplay}.
+              </p>
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${siteUrl}/#reservation" style="display: inline-block; background-color: #667eea; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-size: 14px;">Réserver à nouveau</a>
+            </div>
+            <div style="text-align: center; padding-top: 30px; border-top: 1px solid #e0e0e0;">
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📞 ${phoneDisplay}</p>
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📧 aumurmuredesflots@gmail.com</p>
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📍 44 rue du Général Lambert, 97436 Saint-Leu</p>
+            </div>
+          </div>
+          <div style="background-color: #2c3e50; padding: 30px; text-align: center;">
+            <p style="color: #ecf0f1; margin: 0 0 10px 0; font-size: 16px; font-style: italic;">"Où chaque repas devient un voyage culinaire"</p>
+            <p style="color: #7f8c8d; margin: 20px 0 0 0; font-size: 12px;">© 2025 Au Murmure des Flots - Tous droits réservés</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  };
+
+  try {
+    await emailTransporter.sendMail(mailOptions);
+    console.log(`✅ Email expiration arrhes envoyé à ${reservation.email}`);
+  } catch (error) {
+    console.error('❌ Erreur email expiration arrhes:', error.message);
+  }
+}
+
+// Email envoyé par le staff pour demander les arrhes à un client (groupes téléphone/desktop)
+async function sendDepositRequestEmailToClient(reservation, checkoutUrl) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !reservation.email) return;
+
+  const dateStr = new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const phoneDisplay = process.env.RESTAURANT_PHONE_DISPLAY || '02 62 26 67 19';
+  const expiryMinutes = parseInt(process.env.CHECKOUT_EXPIRY_MINUTES, 10) || 30;
+  const cancellationHours = parseInt(process.env.DEPOSIT_CANCELLATION_HOURS, 10) || 24;
+  const amountEuros = reservation.deposit && reservation.deposit.amountCents
+    ? (reservation.deposit.amountCents / 100).toFixed(2).replace('.', ',')
+    : '?';
+
+  const mailOptions = {
+    from: `"Au Murmure des Flots 🌊" <${process.env.EMAIL_USER}>`,
+    to: reservation.email,
+    subject: `Arrhes à régler — réservation du ${new Date(reservation.date).toLocaleDateString('fr-FR')}`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+      <body style="margin: 0; padding: 0; font-family: 'Georgia', serif; background-color: #f5f5f5;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 20px; text-align: center;">
+            <img src="https://raw.githubusercontent.com/Gleekch/restaurant-booking-backend/main/assets/logo.png" alt="Au Murmure des Flots" style="width: 120px; height: 120px; border-radius: 50%; background: white; padding: 10px; margin: 0 auto 20px; display: block;">
+            <h1 style="color: white; margin: 0; font-size: 28px; font-weight: 300;">Au Murmure des Flots</h1>
+            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px; font-style: italic;">Restaurant Bistronomique</p>
+          </div>
+          <div style="padding: 40px 30px;">
+            <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Arrhes à régler</h2>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${reservation.customerName},</p>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">
+              Pour confirmer votre réservation, nous vous demandons de régler les arrhes en ligne en cliquant sur le bouton ci-dessous.
+            </p>
+            <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
+              <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Votre réservation</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${dateStr}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${reservation.time}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #166534;"><strong>Arrhes :</strong> ${amountEuros} €</p>
+            </div>
+            <div style="text-align: center; margin: 30px 0;">
+              <a href="${checkoutUrl}" style="display: inline-block; background-color: #4caf50; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-size: 16px; font-weight: bold;">💳 Payer mes arrhes</a>
+            </div>
+            <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
+              <p style="color: #8b6914; margin: 0; font-size: 13px; line-height: 1.5;">
+                <strong>⏰ Lien valable ${expiryMinutes} minutes.</strong><br>
+                Ce montant sera déduit de votre addition. Il vous est intégralement remboursé en cas d'annulation au moins ${cancellationHours}h avant votre venue.
+              </p>
+            </div>
+            <div style="text-align: center; padding-top: 30px; border-top: 1px solid #e0e0e0;">
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📞 ${phoneDisplay}</p>
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📧 aumurmuredesflots@gmail.com</p>
+              <p style="color: #666; font-size: 14px; margin: 5px 0;">📍 44 rue du Général Lambert, 97436 Saint-Leu</p>
+            </div>
+          </div>
+          <div style="background-color: #2c3e50; padding: 30px; text-align: center;">
+            <p style="color: #ecf0f1; margin: 0 0 10px 0; font-size: 16px; font-style: italic;">"Où chaque repas devient un voyage culinaire"</p>
+            <p style="color: #7f8c8d; margin: 20px 0 0 0; font-size: 12px;">© 2025 Au Murmure des Flots - Tous droits réservés</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `
+  };
+
+  try {
+    await emailTransporter.sendMail(mailOptions);
+    console.log(`✅ Email demande arrhes envoyé à ${reservation.email}`);
+  } catch (error) {
+    console.error('❌ Erreur email demande arrhes:', error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   sendNotifications,
   sendSMS,
   sendEmail,
+  formatReservationMessage,
   sendConfirmationEmailToClient,
-  sendCancellationEmailToClient
+  sendCancellationEmailToClient,
+  sendDepositExpiredEmailToClient,
+  sendDepositRequestEmailToClient
 };

@@ -491,6 +491,7 @@ main {
 
 .btn-deposit-deduct { background: #dbeafe; color: #1e40af; }
 .btn-deposit-refund { background: #fee2e2; color: #991b1b; }
+.btn-deposit-request { background: #dcfce7; color: #166534; }
 
 .card-name {
     font-size: 15px;

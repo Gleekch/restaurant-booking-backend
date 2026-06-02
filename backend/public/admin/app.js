@@ -717,6 +717,9 @@ function showReservationDetail(r) {
             ${r.status !== 'cancelled' ? `
                 <button class="btn btn-danger" onclick="updateStatus('${r._id}', 'cancelled'); closeModal();"><span class="icon">❌</span> Annuler</button>
             ` : ''}
+            ${r.email && ['pending','confirmed'].includes(r.status) && (!r.deposit || r.deposit.status === 'none' || r.deposit.status === 'failed') ? `
+                <button class="btn btn-deposit-request" onclick="requestDeposit('${r._id}')">💶 Demander les arrhes</button>
+            ` : ''}
             <button class="btn btn-secondary" onclick="openEditForm('${r._id}')">✏️ Modifier</button>
             <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
         </div>
@@ -838,6 +841,21 @@ async function updateStatus(id, status) {
         loadReservations();
     } catch (error) {
         showToast('Erreur lors de la mise à jour', 'error');
+    }
+}
+
+// Envoyer un lien de paiement des arrhes au client (groupes téléphone/desktop)
+async function requestDeposit(id) {
+    if (!confirm('Envoyer un lien de paiement des arrhes par email au client ?')) return;
+    try {
+        const response = await apiFetch(`${API_URL}/api/reservations/${id}/deposit/request`, { method: 'POST' });
+        const data = await response.json().catch(() => null);
+        if (!response.ok) throw new Error((data && data.message) || 'Erreur');
+        showToast('Lien de paiement envoyé au client', 'success');
+        closeModal();
+        loadReservations();
+    } catch (error) {
+        showToast(error.message || 'Erreur lors de l\'envoi', 'error');
     }
 }
 

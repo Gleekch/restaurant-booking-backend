@@ -1,8 +1,15 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 
 const router = express.Router();
+
+const cancelLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  message: { success: false, message: 'Trop de requetes, reessayez dans une heure' }
+});
 const Reservation = require('../models/Reservation');
-const { sendNotifications, sendConfirmationEmailToClient, sendCancellationEmailToClient } = require('../services/notificationService');
+const { sendNotifications, sendConfirmationEmailToClient, sendCancellationEmailToClient, sendDepositRequestEmailToClient } = require('../services/notificationService');
 const {
   checkAvailability,
   CAPACITY,
@@ -587,7 +594,7 @@ router.delete('/:id', apiKey, async (req, res) => {
 });
 
 // Résumé public d'une réservation (page d'annulation client), protégé par le jeton.
-router.get('/:id/public', async (req, res) => {
+router.get('/:id/public', cancelLimiter, async (req, res) => {
   try {
     const { token } = req.query;
     const reservation = await Reservation.findById(req.params.id);
@@ -622,7 +629,7 @@ router.get('/:id/public', async (req, res) => {
 });
 
 // Annulation par le client via son jeton secret (pas d'API key).
-router.post('/:id/cancel', async (req, res) => {
+router.post('/:id/cancel', cancelLimiter, async (req, res) => {
   try {
     const token = req.body && req.body.token;
     const reservation = await Reservation.findById(req.params.id);
@@ -682,6 +689,55 @@ router.post('/:id/deposit/refund', apiKey, async (req, res) => {
     io.emit('update-reservation', reservation);
 
     res.json({ success: true, message: 'Arrhes remboursees', data: reservation });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Envoie un lien de paiement des arrhes au client (pour les groupes pris par téléphone/desktop)
+router.post('/:id/deposit/request', apiKey, async (req, res) => {
+  try {
+    const reservation = await Reservation.findById(req.params.id);
+
+    if (!reservation) {
+      return res.status(404).json({ success: false, message: 'Reservation non trouvee' });
+    }
+
+    if (!['pending', 'confirmed'].includes(reservation.status)) {
+      return res.status(400).json({ success: false, message: 'Impossible de demander des arrhes pour une reservation annulee ou terminee' });
+    }
+
+    if (reservation.deposit && reservation.deposit.status === 'paid') {
+      return res.status(400).json({ success: false, message: 'Les arrhes ont deja ete payees pour cette reservation' });
+    }
+
+    if (!reservation.email) {
+      return res.status(400).json({ success: false, message: 'Aucune adresse email pour cette reservation — envoyez le lien manuellement' });
+    }
+
+    const config = getDepositConfig();
+    const amountCents = computeDepositCents(reservation.numberOfPeople);
+    const expiresAt = new Date(Date.now() + config.expiryMinutes * 60 * 1000);
+
+    reservation.deposit.required = true;
+    reservation.deposit.amountCents = amountCents;
+    reservation.deposit.perPersonCents = config.perPersonCents;
+    reservation.deposit.currency = config.currency;
+    reservation.deposit.status = 'awaiting';
+    reservation.deposit.expiresAt = expiresAt;
+    await reservation.save();
+
+    const session = await createCheckoutSession(reservation);
+    reservation.deposit.stripeSessionId = session.sessionId;
+    reservation.deposit.expiresAt = session.expiresAt;
+    await reservation.save();
+
+    await sendDepositRequestEmailToClient(reservation, session.url);
+
+    const io = req.app.get('io');
+    io.emit('update-reservation', reservation);
+
+    res.json({ success: true, message: 'Lien de paiement envoye au client', data: reservation });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }

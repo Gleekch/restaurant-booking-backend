@@ -7,6 +7,7 @@
 const nodemailer = require('nodemailer');
 const Reservation = require('../models/Reservation');
 const { formatAmount } = require('./paymentService');
+const { sendDepositExpiredEmailToClient } = require('./notificationService');
 
 // Lien personnel d'annulation en ligne (jeton secret par réservation)
 function buildCancelUrl(reservation) {
@@ -149,6 +150,11 @@ async function sweepExpiredDeposits(io) {
       reservation.deposit.status = 'failed';
       await reservation.save();
       if (io) io.emit('cancel-reservation', reservation);
+      if (reservation.email) {
+        sendDepositExpiredEmailToClient(reservation).catch(err =>
+          console.error(`Erreur email expiration acompte (${reservation._id}):`, err.message)
+        );
+      }
       cancelled++;
     } catch (error) {
       console.error(`Erreur annulation acompte expiré (${reservation._id}):`, error.message);

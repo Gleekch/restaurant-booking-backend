@@ -2,7 +2,12 @@ const express = require('express');
 
 const router = express.Router();
 const Reservation = require('../models/Reservation');
-const { sendNotifications } = require('../services/notificationService');
+const {
+  sendEmail,
+  formatReservationMessage,
+  sendConfirmationEmailToClient,
+  sendDepositExpiredEmailToClient
+} = require('../services/notificationService');
 const { getStripe } = require('../services/paymentService');
 
 /**
@@ -37,17 +42,23 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
         reservation.deposit.status = 'paid';
         reservation.deposit.stripePaymentIntentId = session.payment_intent || null;
         reservation.deposit.paidAt = new Date();
-        reservation.status = 'pending';
+        reservation.status = 'confirmed';
         await reservation.save();
 
-        try {
-          await sendNotifications(reservation);
-        } catch (notificationError) {
-          console.error('Erreur notifications post-paiement:', notificationError);
+        // Notif restaurant + email de confirmation directe au client (arrhes payées = confirmé)
+        if (process.env.EMAIL_USER) {
+          sendEmail(formatReservationMessage(reservation), reservation).catch(err =>
+            console.error('Erreur email restaurant post-paiement:', err.message)
+          );
+        }
+        if (reservation.email) {
+          sendConfirmationEmailToClient(reservation).catch(err =>
+            console.error('Erreur email confirmation client post-paiement:', err.message)
+          );
         }
 
         if (io) io.emit('new-reservation', reservation);
-        console.log(`Arrhes payees pour ${reservation.customerName} (${reservation._id})`);
+        console.log(`Arrhes payees, reservation confirmee pour ${reservation.customerName} (${reservation._id})`);
       }
     } else if (event.type === 'checkout.session.expired') {
       const session = event.data.object;
@@ -59,6 +70,11 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
         reservation.deposit.status = 'failed';
         await reservation.save();
         if (io) io.emit('cancel-reservation', reservation);
+        if (reservation.email) {
+          sendDepositExpiredEmailToClient(reservation).catch(err =>
+            console.error('Erreur email expiration paiement:', err.message)
+          );
+        }
         console.log(`Session expiree, reservation annulee (${reservation._id})`);
       }
     }
