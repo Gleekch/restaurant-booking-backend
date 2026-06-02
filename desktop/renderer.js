@@ -520,7 +520,8 @@ function getStatusText(status) {
         pending: 'En attente',
         confirmed: 'Confirmée',
         cancelled: 'Annulée',
-        completed: 'Terminée'
+        completed: 'Terminée',
+        'no-show': 'No-show'
     };
     return statusTexts[status] || status;
 }
@@ -592,7 +593,40 @@ function showReservationDetails(reservation) {
         newDepositBtn.onclick = () => requestDepositDesktop(reservation._id);
     }
 
+    // Boutons "Client arrivé" / "No-show" : visibles si résa active
+    const isActive = ['pending', 'confirmed'].includes(reservation.status);
+    const completedBtn = document.getElementById('completed-btn');
+    const noshowBtn = document.getElementById('noshow-btn');
+    completedBtn.replaceWith(completedBtn.cloneNode(true));
+    noshowBtn.replaceWith(noshowBtn.cloneNode(true));
+    const newCompletedBtn = document.getElementById('completed-btn');
+    const newNoshowBtn = document.getElementById('noshow-btn');
+    newCompletedBtn.style.display = isActive ? 'inline-flex' : 'none';
+    newNoshowBtn.style.display = isActive ? 'inline-flex' : 'none';
+    if (isActive) {
+        newCompletedBtn.onclick = () => markReservationOutcome(reservation._id, 'complete');
+        newNoshowBtn.onclick = () => markReservationOutcome(reservation._id, 'no-show');
+    }
+
     modal.style.display = 'block';
+}
+
+// Marquer l'issue d'une réservation : 'complete' (client arrivé) ou 'no-show'
+async function markReservationOutcome(id, kind) {
+    const label = kind === 'complete' ? 'arrivé' : 'en no-show';
+    if (!confirm(`Marquer ce client comme ${label} ?`)) return;
+    try {
+        const data = await api.apiRequest(`/api/reservations/${id}/${kind}`, { method: 'POST' });
+        if (data.success) {
+            modal.style.display = 'none';
+            await loadReservations();
+            showNotification('Succès', `Client marqué comme ${label}`);
+        } else {
+            alert(`Erreur : ${data.message}`);
+        }
+    } catch (error) {
+        alert(`Erreur lors de la mise à jour : ${error.message}`);
+    }
 }
 
 // Demander les arrhes depuis le desktop

@@ -478,7 +478,8 @@ const STATUS_TEXT = {
     'pending': 'En attente',
     'confirmed': 'Confirmé',
     'cancelled': 'Annulé',
-    'completed': 'Terminé'
+    'completed': 'Terminé',
+    'no-show': 'No-show'
 };
 
 function formatEuros(cents) {
@@ -720,6 +721,10 @@ function showReservationDetail(r) {
             ${r.email && ['pending','confirmed'].includes(r.status) && (!r.deposit || r.deposit.status === 'none' || r.deposit.status === 'failed') ? `
                 <button class="btn btn-deposit-request" onclick="requestDeposit('${r._id}')">💶 Demander les arrhes</button>
             ` : ''}
+            ${['pending','confirmed'].includes(r.status) ? `
+                <button class="btn btn-success" onclick="markCompleted('${r._id}')"><span class="icon">🍽️</span> Client arrivé</button>
+                <button class="btn btn-warning" onclick="markNoShow('${r._id}')"><span class="icon">🚫</span> No-show</button>
+            ` : ''}
             <button class="btn btn-secondary" onclick="openEditForm('${r._id}')">✏️ Modifier</button>
             <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
         </div>
@@ -838,6 +843,34 @@ async function updateStatus(id, status) {
         if (!response.ok) throw new Error('Erreur');
 
         showToast(status === 'confirmed' ? 'Réservation confirmée' : 'Réservation annulée', 'success');
+        loadReservations();
+    } catch (error) {
+        showToast('Erreur lors de la mise à jour', 'error');
+    }
+}
+
+// Marquer un client comme arrivé (réservation terminée, arrhes déduites)
+async function markCompleted(id) {
+    if (!confirm('Marquer ce client comme arrivé ? (les arrhes éventuelles seront déduites de l\'addition)')) return;
+    try {
+        const response = await apiFetch(`${API_URL}/api/reservations/${id}/complete`, { method: 'POST' });
+        if (!response.ok) throw new Error('Erreur');
+        showToast('Client marqué comme arrivé', 'success');
+        closeModal();
+        loadReservations();
+    } catch (error) {
+        showToast('Erreur lors de la mise à jour', 'error');
+    }
+}
+
+// Marquer une réservation en no-show (arrhes conservées)
+async function markNoShow(id) {
+    if (!confirm('Marquer cette réservation en no-show ? (les arrhes éventuelles restent acquises)')) return;
+    try {
+        const response = await apiFetch(`${API_URL}/api/reservations/${id}/no-show`, { method: 'POST' });
+        if (!response.ok) throw new Error('Erreur');
+        showToast('Réservation marquée en no-show', 'success');
+        closeModal();
         loadReservations();
     } catch (error) {
         showToast('Erreur lors de la mise à jour', 'error');

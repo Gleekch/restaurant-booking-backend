@@ -68,12 +68,8 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
         reservation.deposit.paidAt = new Date();
         await reservation.save();
 
-        if (process.env.EMAIL_USER) {
-          sendEmail(formatReservationMessage(reservation), reservation).catch(err =>
-            console.error('Erreur email restaurant arrhes admin:', err.message)
-          );
-        }
-
+        // Pas d'email "Nouvelle réservation" : la résa existe déjà et le staff a
+        // initié la demande. Le dashboard se met à jour en direct (badge arrhes payées).
         if (io) io.emit('update-reservation', reservation);
         console.log(`Arrhes admin payees pour ${reservation.customerName} (${reservation._id})`);
       }

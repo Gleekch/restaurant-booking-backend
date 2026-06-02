@@ -456,6 +456,11 @@ main {
     color: var(--text-secondary);
 }
 
+.card-status.no-show {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
 /* ─── Arrhes ─── */
 .card-deposit { margin-top: 6px; }
 
@@ -954,6 +959,7 @@ main {
 .btn-full { width: 100%; }
 .btn-success { background: var(--success); color: var(--surface); }
 .btn-danger { background: var(--danger); color: var(--surface); }
+.btn-warning { background: #f59e0b; color: var(--surface); }
 .btn-secondary { background: var(--surface-raised); color: var(--text); border: 1px solid var(--border); }
 
 /* ─── Empty State ─── */

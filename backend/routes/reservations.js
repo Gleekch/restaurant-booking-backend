@@ -769,5 +769,65 @@ router.post('/:id/deposit/deducted', apiKey, async (req, res) => {
   }
 });
 
+// Marque le client comme arrivé (résa terminée) : les arrhes payées sont déduites de l'addition
+router.post('/:id/complete', apiKey, async (req, res) => {
+  try {
+    const reservation = await Reservation.findById(req.params.id);
+
+    if (!reservation) {
+      return res.status(404).json({ success: false, message: 'Reservation non trouvee' });
+    }
+
+    if (!['pending', 'confirmed'].includes(reservation.status)) {
+      return res.status(400).json({ success: false, message: 'Seule une reservation active peut etre marquee comme terminee' });
+    }
+
+    reservation.status = 'completed';
+    if (reservation.deposit && reservation.deposit.status === 'paid') {
+      reservation.deposit.status = 'deducted';
+      reservation.deposit.deductedAt = new Date();
+    }
+    await reservation.save();
+
+    const io = req.app.get('io');
+    io.emit('update-reservation', reservation);
+
+    res.json({ success: true, message: 'Client marque comme arrive', data: reservation });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
+// Marque la réservation comme no-show : les arrhes payées restent acquises au restaurant
+router.post('/:id/no-show', apiKey, async (req, res) => {
+  try {
+    const reservation = await Reservation.findById(req.params.id);
+
+    if (!reservation) {
+      return res.status(404).json({ success: false, message: 'Reservation non trouvee' });
+    }
+
+    if (!['pending', 'confirmed'].includes(reservation.status)) {
+      return res.status(400).json({ success: false, message: 'Seule une reservation active peut etre marquee en no-show' });
+    }
+
+    reservation.status = 'no-show';
+    // Les arrhes restent en 'paid' (conservees par le restaurant) — aucune modification
+    await reservation.save();
+
+    const io = req.app.get('io');
+    io.emit('update-reservation', reservation);
+
+    const kept = reservation.deposit && reservation.deposit.status === 'paid';
+    res.json({
+      success: true,
+      message: `Reservation marquee en no-show.${kept ? ' Arrhes conservees.' : ''}`,
+      data: reservation
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
+
 
 module.exports = router;
