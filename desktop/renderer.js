@@ -59,7 +59,8 @@ function getDayKey(value) {
 }
 
 function isActiveReservation(reservation) {
-    return reservation.status !== 'cancelled';
+    // Exclut les annulées ET les réservations non payées (awaiting-payment, transitoires)
+    return !['cancelled', 'awaiting-payment'].includes(reservation.status);
 }
 
 function getReservationService(reservation) {
@@ -266,7 +267,7 @@ async function loadReservations() {
                     .filter(r => {
                         const d = new Date(r.date);
                         d.setHours(0, 0, 0, 0);
-                        return d >= today && r.status !== 'cancelled';
+                        return d >= today && !['cancelled', 'awaiting-payment'].includes(r.status);
                     })
                     .map(r => new Date(r.date))
                     .sort((a, b) => a - b);
@@ -420,7 +421,7 @@ function displayReservations() {
     } else {
         // Service du Midi
         if (serviceMidi.length > 0) {
-            const midiActive = serviceMidi.filter(r => r.status !== 'cancelled');
+            const midiActive = serviceMidi.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
             const midiConfirmed = serviceMidi.filter(r => r.status === 'confirmed');
             const midiPending = serviceMidi.filter(r => r.status === 'pending');
             
@@ -445,7 +446,7 @@ function displayReservations() {
         
         // Service du Soir
         if (serviceSoir.length > 0) {
-            const soirActive = serviceSoir.filter(r => r.status !== 'cancelled');
+            const soirActive = serviceSoir.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
             const soirConfirmed = serviceSoir.filter(r => r.status === 'confirmed');
             const soirPending = serviceSoir.filter(r => r.status === 'pending');
             
@@ -701,7 +702,7 @@ function updateStats() {
     );
     
     // Filtrer les réservations actives (non annulées)
-    const activeReservations = todayReservations.filter(r => r.status !== 'cancelled');
+    const activeReservations = todayReservations.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
     const confirmedReservations = todayReservations.filter(r => r.status === 'confirmed');
     const pendingReservations = todayReservations.filter(r => r.status === 'pending');
     
@@ -785,7 +786,7 @@ function extractClients(source = reservations) {
     const clientsMap = new Map();
 
     // Exclure les réservations annulées
-    const activeSource = source.filter(r => r.status !== 'cancelled');
+    const activeSource = source.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
 
     activeSource.forEach(reservation => {
         const key = reservation.email || reservation.phoneNumber;

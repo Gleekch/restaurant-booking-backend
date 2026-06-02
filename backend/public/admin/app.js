@@ -36,7 +36,7 @@ function getWaveCutoffs(date) {
 }
 
 function getWaveSummary(serviceReservations, cutoffStr) {
-    const active = serviceReservations.filter(r => r.status !== 'cancelled');
+    const active = serviceReservations.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
     const wave1 = active.filter(r => r.time < cutoffStr);
     const wave2 = active.filter(r => r.time >= cutoffStr);
     return {
@@ -203,7 +203,7 @@ async function renderTodayView() {
             .filter(r => {
                 const d = new Date(r.date);
                 d.setHours(0, 0, 0, 0);
-                return d >= today && r.status !== 'cancelled';
+                return d >= today && !['cancelled', 'awaiting-payment'].includes(r.status);
             })
             .map(r => new Date(r.date))
             .sort((a, b) => a - b);
@@ -220,7 +220,7 @@ async function renderTodayView() {
         ? `Aujourd'hui - ${displayDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}`
         : `${displayDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}`;
 
-    const active = todayReservations.filter(r => r.status !== 'cancelled');
+    const active = todayReservations.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
     const midi = active.filter(r => parseInt(r.time.split(':')[0]) < 15);
     const soir = active.filter(r => parseInt(r.time.split(':')[0]) >= 15);
 
@@ -393,7 +393,7 @@ function renderMonthView() {
                 const dayReservations = reservations.filter(r =>
                     new Date(r.date).toDateString() === day.toDateString()
                 );
-                const active = dayReservations.filter(r => r.status !== 'cancelled');
+                const active = dayReservations.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
                 const midi = active.filter(r => parseInt(r.time.split(':')[0]) < 15);
                 const soir = active.filter(r => parseInt(r.time.split(':')[0]) >= 15);
                 const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
@@ -438,7 +438,7 @@ function showDayDetail(dateISO) {
     const dayReservations = reservations.filter(r =>
         new Date(r.date).toDateString() === date.toDateString()
     );
-    const active = dayReservations.filter(r => r.status !== 'cancelled');
+    const active = dayReservations.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
     const midi = active.filter(r => parseInt(r.time.split(':')[0]) < 15).sort((a, b) => a.time.localeCompare(b.time));
     const soir = active.filter(r => parseInt(r.time.split(':')[0]) >= 15).sort((a, b) => a.time.localeCompare(b.time));
     const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -564,7 +564,7 @@ function renderDayCard(day) {
     const isToday = dayStr === today;
 
     const dayReservations = reservations.filter(r =>
-        new Date(r.date).toDateString() === dayStr && r.status !== 'cancelled'
+        new Date(r.date).toDateString() === dayStr && !['cancelled', 'awaiting-payment'].includes(r.status)
     );
 
     const midi = dayReservations.filter(r => parseInt(r.time.split(':')[0]) < 15);
@@ -609,7 +609,7 @@ function showDayServiceDetail(dateISO, service) {
     const [y, m, d] = dateISO.split('-').map(Number);
     const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
-        new Date(r.date).toDateString() === date.toDateString() && r.status !== 'cancelled'
+        new Date(r.date).toDateString() === date.toDateString() && !['cancelled', 'awaiting-payment'].includes(r.status)
     );
 
     const filtered = dayReservations.filter(r => {
@@ -715,7 +715,7 @@ function showReservationDetail(r) {
             ${r.status !== 'confirmed' ? `
                 <button class="btn btn-success" onclick="updateStatus('${r._id}', 'confirmed'); closeModal();"><span class="icon">✅</span> Confirmer</button>
             ` : ''}
-            ${r.status !== 'cancelled' ? `
+            ${!['cancelled', 'awaiting-payment'].includes(r.status) ? `
                 <button class="btn btn-danger" onclick="updateStatus('${r._id}', 'cancelled'); closeModal();"><span class="icon">❌</span> Annuler</button>
             ` : ''}
             ${r.email && ['pending','confirmed'].includes(r.status) && (!r.deposit || r.deposit.status === 'none' || r.deposit.status === 'failed') ? `
