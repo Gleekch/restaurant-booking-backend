@@ -668,11 +668,23 @@ function attachCardListeners() {
 function showReservationDetail(r) {
     const date = new Date(r.date);
     const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const statusText = {
-        'pending': 'En attente',
-        'confirmed': 'Confirmé',
-        'cancelled': 'Annulé'
+    const statusText = STATUS_TEXT;
+
+    // Libellé des arrhes pour la fiche détail
+    const depositLabels = {
+        awaiting: 'En attente de paiement',
+        paid: 'Payées',
+        deducted: 'Déduites de l\'addition',
+        refunded: 'Remboursées',
+        failed: 'Non abouti'
     };
+    const d = r.deposit;
+    const depositRow = (d && d.required) ? `
+            <div class="detail-row">
+                <span class="detail-label">Arrhes</span>
+                <span class="detail-value"><strong>${formatEuros(d.amountCents)}</strong> — ${depositLabels[d.status] || d.status}</span>
+            </div>
+    ` : '';
 
     document.getElementById('modal-title').textContent = r.customerName;
     document.getElementById('modal-body').innerHTML = `
@@ -693,6 +705,7 @@ function showReservationDetail(r) {
                 <span class="detail-label">Personnes</span>
                 <span class="detail-value">${r.numberOfPeople}</span>
             </div>
+            ${depositRow}
             <div class="detail-row">
                 <span class="detail-label">Téléphone</span>
                 <span class="detail-value"><a href="tel:${r.phoneNumber}">${r.phoneNumber}</a></span>

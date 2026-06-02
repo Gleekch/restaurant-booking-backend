@@ -552,6 +552,7 @@ function showReservationDetails(reservation) {
         <p><strong>Date:</strong> ${new Date(reservation.date).toLocaleDateString('fr-FR')}</p>
         <p><strong>Heure:</strong> ${reservation.time}</p>
         <p><strong>Nombre de personnes:</strong> ${reservation.numberOfPeople}</p>
+        ${getDepositText(reservation) ? `<p><strong>Arrhes:</strong> ${getDepositText(reservation)}</p>` : ''}
         <p><strong>Statut:</strong> ${getStatusText(reservation.status)}</p>
         <p><strong>Source:</strong> ${reservation.source}</p>
         ${reservation.specialRequests ? `<p><strong>Demandes spéciales:</strong> ${reservation.specialRequests}</p>` : ''}
