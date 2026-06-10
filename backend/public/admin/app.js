@@ -432,7 +432,8 @@ function renderMonthView() {
 }
 
 // Show day detail from month view
-function showDayDetail(dateISO) {
+async function showDayDetail(dateISO) {
+    await loadBlockedServices(dateISO);
     const [y, m, d] = dateISO.split('-').map(Number);
     const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
@@ -442,6 +443,14 @@ function showDayDetail(dateISO) {
     const midi = active.filter(r => parseInt(r.time.split(':')[0]) < 15).sort((a, b) => a.time.localeCompare(b.time));
     const soir = active.filter(r => parseInt(r.time.split(':')[0]) >= 15).sort((a, b) => a.time.localeCompare(b.time));
     const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+    const blockBtn = (service) => {
+        const blocked = isServiceBlocked(service);
+        const tag = blocked ? '<span style="background:#dc2626;color:white;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : '';
+        return `${tag}<div style="text-align:right; margin:8px 14px 0;">
+            <button class="btn-block-service" data-date="${dateISO}" data-service="${service}" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">🔒 Marquer complet</button>
+        </div>`;
+    };
 
     content.innerHTML = `
         <button class="back-btn" onclick="renderMonthView()">← Retour au mois</button>
@@ -460,16 +469,19 @@ function showDayDetail(dateISO) {
         </div>
         <div class="service-section">
             <div class="service-header midi"><span>☀️</span><h3>Midi</h3><span class="service-count">${midi.length} rés. / ${midi.reduce((s, r) => s + r.numberOfPeople, 0)} couv.</span></div>
+            ${blockBtn('midi')}
             ${midi.length === 0 ? '<div class="empty-state"><p>Aucune réservation</p></div>' :
                 `<div class="reservations-grid">${midi.map(r => renderReservationCard(r)).join('')}</div>`}
         </div>
         <div class="service-section">
             <div class="service-header soir"><span>🌙</span><h3>Soir</h3><span class="service-count">${soir.length} rés. / ${soir.reduce((s, r) => s + r.numberOfPeople, 0)} couv.</span></div>
+            ${blockBtn('soir')}
             ${soir.length === 0 ? '<div class="empty-state"><p>Aucune réservation</p></div>' :
                 `<div class="reservations-grid">${soir.map(r => renderReservationCard(r)).join('')}</div>`}
         </div>
     `;
     attachCardListeners();
+    attachBlockButtons(() => showDayDetail(dateISO));
 }
 
 // Render Reservation Card
@@ -605,7 +617,8 @@ function renderDayCard(day) {
 }
 
 // Show Day Service Detail
-function showDayServiceDetail(dateISO, service) {
+async function showDayServiceDetail(dateISO, service) {
+    await loadBlockedServices(dateISO);
     const [y, m, d] = dateISO.split('-').map(Number);
     const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
@@ -620,11 +633,12 @@ function showDayServiceDetail(dateISO, service) {
     const serviceName = service === 'midi' ? '☀️ Midi' : '🌙 Soir';
     const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
     const totalCovers = filtered.reduce((sum, r) => sum + r.numberOfPeople, 0);
+    const blocked = isServiceBlocked(service);
 
     content.innerHTML = `
         <button class="back-btn" onclick="renderWeekView()">← Retour</button>
         <div class="summary-card">
-            <h2 class="summary-title">${serviceName} - ${dateStr}</h2>
+            <h2 class="summary-title">${serviceName} - ${dateStr} ${blocked ? '<span style="background:#dc2626;color:white;font-size:11px;padding:2px 8px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h2>
             <div class="summary-stats">
                 <div class="stat-item">
                     <div class="stat-value">${filtered.length}</div>
@@ -634,6 +648,9 @@ function showDayServiceDetail(dateISO, service) {
                     <div class="stat-value">${totalCovers}</div>
                     <div class="stat-label">Couverts</div>
                 </div>
+            </div>
+            <div style="text-align:right; margin-top:12px;">
+              <button class="btn-block-service" data-date="${dateISO}" data-service="${service}" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">🔒 Marquer complet</button>
             </div>
         </div>
 
@@ -651,6 +668,7 @@ function showDayServiceDetail(dateISO, service) {
     `;
 
     attachCardListeners();
+    attachBlockButtons(() => showDayServiceDetail(dateISO, service));
 }
 
 // Attach Card Click Listeners
@@ -1047,7 +1065,7 @@ function isServiceBlocked(service) {
     return blockedServicesCache.includes(service) || blockedServicesCache.includes('all');
 }
 
-async function toggleBlockService(date, service) {
+async function toggleBlockService(date, service, rerender) {
     if (isServiceBlocked(service)) {
         await apiFetch(`${API_URL}/api/blocked-services`, {
             method: 'DELETE',
@@ -1064,10 +1082,11 @@ async function toggleBlockService(date, service) {
         showToast(`Service ${service} marqué complet sur le site`, 'success');
     }
     await loadBlockedServices(date);
-    renderTodayView();
+    // Re-render la vue d'origine (Aujourd'hui par défaut, ou la vue détail appelante)
+    (rerender || renderTodayView)();
 }
 
-function attachBlockButtons() {
+function attachBlockButtons(rerender) {
     document.querySelectorAll('.btn-block-service').forEach(btn => {
         const service = btn.dataset.service;
         const blocked = isServiceBlocked(service);
@@ -1077,7 +1096,7 @@ function attachBlockButtons() {
 
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            await toggleBlockService(btn.dataset.date, service);
+            await toggleBlockService(btn.dataset.date, service, rerender);
         });
     });
 }
