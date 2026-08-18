@@ -55,6 +55,17 @@ app.use('/api/webhooks', require('./routes/webhooks'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.get('/api/health', (req, res) => {
+  const databaseReady = mongoose.connection.readyState === 1;
+  res.status(databaseReady ? 200 : 503).json({
+    status: databaseReady ? 'ok' : 'degraded',
+    database: databaseReady ? 'connected' : 'unavailable',
+    commit: process.env.RENDER_GIT_COMMIT
+      ? process.env.RENDER_GIT_COMMIT.slice(0, 7)
+      : 'local'
+  });
+});
+
 // Rate limiting — anti-spam sur la création de réservations publiques
 const reservationLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
