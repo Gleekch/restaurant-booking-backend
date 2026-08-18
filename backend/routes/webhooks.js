@@ -9,13 +9,170 @@ const {
   sendDepositExpiredEmailToClient
 } = require('../services/notificationService');
 const { getStripe } = require('../services/paymentService');
+const { refundReservationSafely, applyRefundEvent } = require('../services/depositRefundService');
+
+function paymentIntentId(session) {
+  return typeof session.payment_intent === 'string'
+    ? session.payment_intent
+    : session.payment_intent && session.payment_intent.id;
+}
+
+function getCheckoutIdentity(session) {
+  const reservationId = session.metadata && session.metadata.reservationId;
+  const checkoutAttempt = Number(session.metadata && session.metadata.checkoutAttempt);
+  if (!reservationId || !Number.isInteger(checkoutAttempt) || checkoutAttempt < 1) {
+    throw new Error(`Session Checkout ${session.id} sans identite de reservation valide`);
+  }
+  return { reservationId, checkoutAttempt };
+}
+
+function validateCheckoutSession(session, reservation, checkoutAttempt) {
+  if (!reservation.deposit || reservation.deposit.checkoutAttempt !== checkoutAttempt) {
+    throw new Error(`Session Checkout obsolete pour la reservation ${reservation._id}`);
+  }
+  if (reservation.deposit.stripeSessionId && reservation.deposit.stripeSessionId !== session.id) {
+    throw new Error(`Session Checkout inattendue pour la reservation ${reservation._id}`);
+  }
+  if (Number(session.amount_total) !== Number(reservation.deposit.amountCents)) {
+    throw new Error(`Montant Checkout incorrect pour la reservation ${reservation._id}`);
+  }
+  if (String(session.currency || '').toLowerCase() !== String(reservation.deposit.currency || '').toLowerCase()) {
+    throw new Error(`Devise Checkout incorrecte pour la reservation ${reservation._id}`);
+  }
+  if (!paymentIntentId(session)) {
+    throw new Error(`PaymentIntent absent de la session Checkout ${session.id}`);
+  }
+}
+
+async function handleCheckoutPaid(session, io) {
+  if (session.payment_status !== 'paid') return { awaitingAsyncPayment: true };
+
+  const { reservationId, checkoutAttempt } = getCheckoutIdentity(session);
+  const before = await Reservation.findById(reservationId);
+  if (!before) throw new Error(`Reservation ${reservationId} introuvable pour le paiement ${session.id}`);
+
+  validateCheckoutSession(session, before, checkoutAttempt);
+  const intentId = paymentIntentId(session);
+  const onlineFlow = before.status === 'awaiting-payment';
+  const paidAfterCancellation = before.status === 'cancelled';
+  const setFields = {
+    'deposit.status': 'paid',
+    'deposit.stripeSessionId': session.id,
+    'deposit.stripePaymentIntentId': intentId,
+    'deposit.paidAt': new Date()
+  };
+  if (onlineFlow) setFields.status = 'confirmed';
+
+  const reservation = await Reservation.findOneAndUpdate(
+    {
+      _id: reservationId,
+      'deposit.status': 'awaiting',
+      'deposit.checkoutAttempt': checkoutAttempt,
+      $or: [
+        { 'deposit.stripeSessionId': session.id },
+        { 'deposit.stripeSessionId': null }
+      ]
+    },
+    { $set: setFields },
+    { new: true, runValidators: true }
+  );
+
+  if (!reservation) {
+    const current = await Reservation.findById(reservationId);
+    const samePayment = current && current.deposit
+      && current.deposit.stripePaymentIntentId === intentId
+      && ['paid', 'refund_pending', 'refunded', 'deducted'].includes(current.deposit.status);
+    if (samePayment) return { duplicate: true, reservation: current };
+    throw new Error(`Transition de paiement refusee pour la reservation ${reservationId}`);
+  }
+
+  // Un paiement qui gagne la course avec une annulation est immédiatement
+  // remboursé avec la même protection d'idempotence.
+  if (paidAfterCancellation) {
+    const refundResult = await refundReservationSafely(reservationId);
+    if (io) io.emit('update-reservation', refundResult.reservation);
+    return { reservation: refundResult.reservation, refundedAfterCancellation: true };
+  }
+
+  if (onlineFlow) {
+    if (process.env.EMAIL_USER) {
+      sendEmail(formatReservationMessage(reservation), reservation).catch(err =>
+        console.error('Erreur email restaurant post-paiement:', err.message)
+      );
+    }
+    if (reservation.email) {
+      sendConfirmationEmailToClient(reservation).catch(err =>
+        console.error('Erreur email confirmation client post-paiement:', err.message)
+      );
+    }
+    if (io) io.emit('new-reservation', reservation);
+  } else if (io) {
+    io.emit('update-reservation', reservation);
+  }
+
+  return { reservation };
+}
+
+async function handleCheckoutUnavailable(session, io) {
+  const { reservationId, checkoutAttempt } = getCheckoutIdentity(session);
+  const before = await Reservation.findById(reservationId);
+  if (!before) return { missingReservation: true };
+  if (!before.deposit || before.deposit.checkoutAttempt !== checkoutAttempt) return { stale: true };
+  if (before.deposit.stripeSessionId && before.deposit.stripeSessionId !== session.id) return { stale: true };
+
+  const onlineFlow = before.status === 'awaiting-payment';
+  const setFields = { 'deposit.status': 'failed', 'deposit.stripeSessionId': session.id };
+  if (onlineFlow) {
+    setFields.status = 'cancelled';
+    setFields.activeBookingKey = null;
+  }
+
+  const reservation = await Reservation.findOneAndUpdate(
+    {
+      _id: reservationId,
+      'deposit.status': 'awaiting',
+      'deposit.checkoutAttempt': checkoutAttempt,
+      $or: [
+        { 'deposit.stripeSessionId': session.id },
+        { 'deposit.stripeSessionId': null }
+      ]
+    },
+    { $set: setFields },
+    { new: true, runValidators: true }
+  );
+
+  if (!reservation) return { duplicate: true };
+  if (io) io.emit(onlineFlow ? 'cancel-reservation' : 'update-reservation', reservation);
+  if (reservation.email) {
+    sendDepositExpiredEmailToClient(reservation).catch(err =>
+      console.error('Erreur email expiration paiement:', err.message)
+    );
+  }
+  return { reservation };
+}
+
+async function processStripeEvent(event, io) {
+  switch (event.type) {
+    case 'checkout.session.completed':
+    case 'checkout.session.async_payment_succeeded':
+      return handleCheckoutPaid(event.data.object, io);
+    case 'checkout.session.expired':
+    case 'checkout.session.async_payment_failed':
+      return handleCheckoutUnavailable(event.data.object, io);
+    case 'refund.created':
+    case 'refund.updated':
+    case 'refund.failed': {
+      const reservation = await applyRefundEvent(event.data.object);
+      if (reservation && io) io.emit('update-reservation', reservation);
+      return { reservation };
+    }
+    default:
+      return { ignored: true };
+  }
+}
 
 /**
- * Webhook Stripe.
- *
- * IMPORTANT : ce routeur DOIT être monté avec express.raw AVANT le
- * express.json() global de server.js, car la vérification de signature
- * exige le corps brut de la requête.
+ * Ce routeur doit être monté avec express.raw avant express.json().
  */
 router.post('/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
   const signature = req.headers['stripe-signature'];
@@ -23,94 +180,24 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
 
   let event;
   try {
-    const stripe = getStripe();
-    event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
+    event = getStripe().webhooks.constructEvent(req.body, signature, webhookSecret);
   } catch (error) {
     console.error('Signature webhook Stripe invalide:', error.message);
     return res.status(400).send(`Webhook Error: ${error.message}`);
   }
 
-  const io = req.app.get('io');
-
   try {
-    if (event.type === 'checkout.session.completed') {
-      const session = event.data.object;
-      const reservationId = session.metadata && session.metadata.reservationId;
-      const reservation = reservationId ? await Reservation.findById(reservationId) : null;
-
-      if (reservation && reservation.status === 'awaiting-payment') {
-        // Flux normal : réservation en ligne → paiement confirme la résa
-        reservation.deposit.status = 'paid';
-        reservation.deposit.stripePaymentIntentId = session.payment_intent || null;
-        reservation.deposit.paidAt = new Date();
-        reservation.status = 'confirmed';
-        await reservation.save();
-
-        if (process.env.EMAIL_USER) {
-          sendEmail(formatReservationMessage(reservation), reservation).catch(err =>
-            console.error('Erreur email restaurant post-paiement:', err.message)
-          );
-        }
-        if (reservation.email) {
-          sendConfirmationEmailToClient(reservation).catch(err =>
-            console.error('Erreur email confirmation client post-paiement:', err.message)
-          );
-        }
-
-        if (io) io.emit('new-reservation', reservation);
-        console.log(`Arrhes payees, reservation confirmee pour ${reservation.customerName} (${reservation._id})`);
-
-      } else if (reservation && reservation.deposit && reservation.deposit.status === 'awaiting') {
-        // Flux admin "Demander les arrhes" : la résa existe déjà (pending/confirmed)
-        // On enregistre le paiement sans changer le statut de la réservation
-        reservation.deposit.status = 'paid';
-        reservation.deposit.stripePaymentIntentId = session.payment_intent || null;
-        reservation.deposit.paidAt = new Date();
-        await reservation.save();
-
-        // Pas d'email "Nouvelle réservation" : la résa existe déjà et le staff a
-        // initié la demande. Le dashboard se met à jour en direct (badge arrhes payées).
-        if (io) io.emit('update-reservation', reservation);
-        console.log(`Arrhes admin payees pour ${reservation.customerName} (${reservation._id})`);
-      }
-    } else if (event.type === 'checkout.session.expired') {
-      const session = event.data.object;
-      const reservationId = session.metadata && session.metadata.reservationId;
-      const reservation = reservationId ? await Reservation.findById(reservationId) : null;
-
-      if (reservation && reservation.status === 'awaiting-payment') {
-        // Flux normal : réservation non confirmée → annulation
-        reservation.status = 'cancelled';
-        reservation.deposit.status = 'failed';
-        await reservation.save();
-        if (io) io.emit('cancel-reservation', reservation);
-        if (reservation.email) {
-          sendDepositExpiredEmailToClient(reservation).catch(err =>
-            console.error('Erreur email expiration paiement:', err.message)
-          );
-        }
-        console.log(`Session expiree, reservation annulee (${reservation._id})`);
-
-      } else if (reservation && reservation.deposit && reservation.deposit.status === 'awaiting') {
-        // Flux admin : le lien a expiré mais la résa reste active → on remet juste le dépôt à 'failed'
-        reservation.deposit.status = 'failed';
-        await reservation.save();
-        if (io) io.emit('update-reservation', reservation);
-        if (reservation.email) {
-          sendDepositExpiredEmailToClient(reservation).catch(err =>
-            console.error('Erreur email expiration lien admin:', err.message)
-          );
-        }
-        console.log(`Lien arrhes admin expire, reservation conservee (${reservation._id})`);
-      }
-    }
+    await processStripeEvent(event, req.app.get('io'));
+    return res.json({ received: true });
   } catch (error) {
-    console.error('Erreur traitement webhook Stripe:', error);
-    // On renvoie tout de même 200 pour éviter que Stripe ne réessaie en boucle
-    // sur une erreur applicative non récupérable.
+    console.error(`Erreur traitement webhook Stripe ${event.id}:`, error);
+    // Un 5xx demande à Stripe de rejouer l'événement. Les transitions MongoDB
+    // et les appels Stripe sont idempotents, ce rejeu est donc sans danger.
+    return res.status(500).json({ received: false, retry: true });
   }
-
-  res.json({ received: true });
 });
 
 module.exports = router;
+module.exports.processStripeEvent = processStripeEvent;
+module.exports.handleCheckoutPaid = handleCheckoutPaid;
+module.exports.handleCheckoutUnavailable = handleCheckoutUnavailable;

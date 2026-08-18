@@ -6,6 +6,7 @@ const dotenv = require('dotenv');
 const io = require('socket.io-client');
 
 const DEFAULT_BACKEND_URL = 'https://restaurant-booking-backend-y3sp.onrender.com';
+const DESKTOP_ENV_KEYS = new Set(['BACKEND_URL', 'API_KEY']);
 
 // En mode packagé (exe), stdout/stderr causent EPIPE sur Windows.
 // __dirname contient 'app.asar' uniquement quand l'app est packagée.
@@ -19,18 +20,20 @@ process.on('uncaughtException', (error) => {
 function getCandidateEnvPaths() {
   const candidates = [
     process.env.RESTAURANT_ENV_PATH,
+    path.resolve(process.cwd(), '.env.desktop'),
     path.resolve(process.cwd(), '.env'),
+    path.resolve(__dirname, '..', '.env.desktop'),
     path.resolve(__dirname, '..', '.env')
   ].filter(Boolean);
 
   if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, '.env.desktop'));
     candidates.push(path.join(process.resourcesPath, '.env'));
-    candidates.push(path.join(process.resourcesPath, '..', '.env'));
   }
 
   if (process.execPath) {
+    candidates.push(path.join(path.dirname(process.execPath), '.env.desktop'));
     candidates.push(path.join(path.dirname(process.execPath), '.env'));
-    candidates.push(path.join(path.dirname(process.execPath), 'resources', '.env'));
   }
 
   return [...new Set(candidates)];
@@ -42,13 +45,19 @@ function loadEnvironmentConfig() {
       continue;
     }
 
-    const result = dotenv.config({ path: envPath });
-    if (!result.error) {
+    try {
+      const parsed = dotenv.parse(fs.readFileSync(envPath));
+      for (const key of DESKTOP_ENV_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(parsed, key) && typeof process.env[key] === 'undefined') {
+          process.env[key] = parsed[key];
+        }
+      }
       return envPath;
+    } catch (error) {
+      safeError('Configuration desktop illisible:', error.message);
     }
   }
 
-  dotenv.config();
   return null;
 }
 
@@ -59,8 +68,6 @@ const loadedEnvPath = loadEnvironmentConfig();
 
 const BACKEND_URL = (process.env.BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/$/, '');
 const API_KEY = process.env.API_KEY || '';
-const ADMIN_USER = process.env.ADMIN_USER || '';
-const ADMIN_PASS = process.env.ADMIN_PASS || '';
 
 let mainWindow;
 let tray;
@@ -86,13 +93,6 @@ function buildAuthHeaders() {
   const key = process.env.API_KEY || API_KEY;
   if (key) {
     return { 'X-API-Key': key };
-  }
-
-  const user = process.env.ADMIN_USER || ADMIN_USER;
-  const pass = process.env.ADMIN_PASS || ADMIN_PASS;
-  if (user && pass) {
-    const token = Buffer.from(`${user}:${pass}`).toString('base64');
-    return { Authorization: `Basic ${token}` };
   }
 
   return {};

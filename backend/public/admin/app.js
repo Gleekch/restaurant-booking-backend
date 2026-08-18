@@ -505,6 +505,7 @@ function depositBadge(r) {
     const map = {
         awaiting: `<span class="deposit-badge awaiting">⏳ Arrhes non payées</span>`,
         paid:     `<span class="deposit-badge paid">💶 Arrhes ${amount} payées</span>`,
+        refund_pending: `<span class="deposit-badge awaiting">⏳ Remboursement en cours</span>`,
         deducted: `<span class="deposit-badge deducted">✓ Arrhes déduites (${amount})</span>`,
         refunded: `<span class="deposit-badge refunded">↩ Arrhes remboursées</span>`,
         failed:   `<span class="deposit-badge failed">⚠ Paiement non abouti</span>`
@@ -514,7 +515,14 @@ function depositBadge(r) {
 
 function depositActions(r) {
     const d = r.deposit;
-    if (!d || d.status !== 'paid') return '';
+    if (!d) return '';
+    if (d.status === 'refund_pending') {
+        return `
+        <div class="deposit-actions">
+            <button class="btn-deposit-refund" onclick="refundDepositReservation('${r._id}', true)">Vérifier / relancer</button>
+        </div>`;
+    }
+    if (d.status !== 'paid') return '';
     return `
         <div class="deposit-actions">
             <button class="btn-deposit-deduct" onclick="markDepositDeducted('${r._id}')">Déduire de l'addition</button>
@@ -692,6 +700,7 @@ function showReservationDetail(r) {
     const depositLabels = {
         awaiting: 'En attente de paiement',
         paid: 'Payées',
+        refund_pending: 'Remboursement en cours',
         deducted: 'Déduites de l\'addition',
         refunded: 'Remboursées',
         failed: 'Non abouti'
@@ -924,15 +933,19 @@ async function requestDeposit(id) {
 }
 
 // Rembourser les arrhes
-async function refundDepositReservation(id) {
-    if (!confirm('Rembourser les arrhes de cette réservation ?')) return;
+async function refundDepositReservation(id, pending = false) {
+    const question = pending
+        ? 'Vérifier et relancer ce remboursement en attente ?'
+        : 'Rembourser les arrhes de cette réservation ?';
+    if (!confirm(question)) return;
     try {
         const response = await apiFetch(`${API_URL}/api/reservations/${id}/deposit/refund`, { method: 'POST' });
-        if (!response.ok) throw new Error('Erreur');
-        showToast('Arrhes remboursées', 'success');
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Erreur');
+        showToast(result.message || 'Remboursement vérifié', result.pending ? 'info' : 'success');
         loadReservations();
     } catch (error) {
-        showToast('Erreur lors du remboursement', 'error');
+        showToast(error.message || 'Erreur lors du remboursement', 'error');
     }
 }
 

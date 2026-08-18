@@ -7,6 +7,9 @@ const socketIo = require('socket.io');
 const rateLimit = require('express-rate-limit');
 const { apiKey, basicAuth } = require('./middleware/auth');
 require('dotenv').config();
+const { startReminderScheduler } = require('./services/reminderService');
+const { startRefundReconciliationScheduler } = require('./services/depositRefundService');
+const Reservation = require('./models/Reservation');
 
 const app = express();
 const server = http.createServer(app);
@@ -71,10 +74,15 @@ app.use('/admin', basicAuth, express.static(path.join(__dirname, 'public', 'admi
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/restaurant_booking', {
   useNewUrlParser: true,
   useUnifiedTopology: true
-}).then(() => {
+}).then(async () => {
   console.log('Connected to MongoDB');
+  await Reservation.createIndexes();
+  console.log('Index anti-doublon Reservation verifies');
+  startReminderScheduler(io);
+  startRefundReconciliationScheduler();
 }).catch(err => {
-  console.error('MongoDB connection error:', err);
+  console.error('Initialisation MongoDB impossible:', err);
+  process.exit(1);
 });
 
 // ─── Routes publiques ───
@@ -109,11 +117,7 @@ io.on('connection', (socket) => {
 
 app.set('io', io);
 
-// Scheduler de rappels
-const { startReminderScheduler } = require('./services/reminderService');
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  startReminderScheduler(io);
 });

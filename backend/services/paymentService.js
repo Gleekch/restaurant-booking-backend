@@ -8,6 +8,7 @@
  */
 
 const Stripe = require('stripe');
+const crypto = require('crypto');
 
 // Instance Stripe paresseuse : on ne plante pas au démarrage si la clé
 // n'est pas configurée (système d'arrhes désactivé).
@@ -18,8 +19,13 @@ function getStripe() {
   if (!key) {
     throw new Error('STRIPE_SECRET_KEY non configurée');
   }
-  stripeClient = new Stripe(key);
+  stripeClient = new Stripe(key, { apiVersion: '2026-06-24.dahlia' });
   return stripeClient;
+}
+
+function stableLetterSuffix(value) {
+  const bytes = crypto.createHash('sha256').update(String(value)).digest();
+  return Array.from(bytes.subarray(0, 8), byte => String.fromCharCode(97 + (byte % 26))).join('');
 }
 
 function getDepositConfig() {
@@ -66,10 +72,12 @@ async function createCheckoutSession(reservation) {
     weekday: 'long', day: 'numeric', month: 'long'
   });
   const expiresAt = new Date(Date.now() + config.expiryMinutes * 60 * 1000);
+  const checkoutAttempt = Math.max(1, Number(reservation.deposit.checkoutAttempt) || 1);
+  const checkoutKey = `deposit-checkout:${reservation._id}:${checkoutAttempt}`;
 
   const session = await stripe.checkout.sessions.create({
     mode: 'payment',
-    payment_method_types: ['card'],
+    integration_identifier: `booking_deposit_${stableLetterSuffix(checkoutKey)}`,
     customer_email: reservation.email || undefined,
     line_items: [
       {
@@ -88,13 +96,16 @@ async function createCheckoutSession(reservation) {
     ],
     metadata: {
       reservationId: String(reservation._id),
-      numberOfPeople: String(reservation.numberOfPeople)
+      numberOfPeople: String(reservation.numberOfPeople),
+      checkoutAttempt: String(checkoutAttempt),
+      amountCents: String(amountCents),
+      currency: config.currency
     },
     // expires_at attend un timestamp Unix en secondes
     expires_at: Math.floor(expiresAt.getTime() / 1000),
     success_url: `${config.siteUrl}/?reservation=success#reservation`,
     cancel_url: `${config.siteUrl}/?reservation=cancelled#reservation`
-  });
+  }, { idempotencyKey: checkoutKey });
 
   return { url: session.url, sessionId: session.id, expiresAt };
 }
@@ -109,7 +120,21 @@ async function refundDeposit(reservation) {
   if (!paymentIntentId) {
     throw new Error('Aucun paiement à rembourser pour cette réservation');
   }
-  return stripe.refunds.create({ payment_intent: paymentIntentId });
+  return stripe.refunds.create(
+    {
+      payment_intent: paymentIntentId,
+      metadata: { reservationId: String(reservation._id) }
+    },
+    { idempotencyKey: `deposit-refund:${reservation._id}:${paymentIntentId}` }
+  );
+}
+
+async function expireCheckoutSession(reservation) {
+  const sessionId = reservation.deposit && reservation.deposit.stripeSessionId;
+  if (!sessionId) return null;
+  return getStripe().checkout.sessions.expire(sessionId, {}, {
+    idempotencyKey: `deposit-checkout-expire:${reservation._id}:${sessionId}`
+  });
 }
 
 module.exports = {
@@ -119,5 +144,6 @@ module.exports = {
   computeDepositCents,
   formatAmount,
   createCheckoutSession,
-  refundDeposit
+  refundDeposit,
+  expireCheckoutSession
 };

@@ -36,6 +36,9 @@ const reservationSchema = new mongoose.Schema({
     enum: ['website', 'mobile', 'phone', 'walk-in', 'desktop'],
     required: true
   },
+  bookingRequestKey: { type: String, default: null },
+  bookingRequestFingerprint: { type: String, default: null },
+  activeBookingKey: { type: String, default: null },
   status: {
     type: String,
     enum: ['awaiting-payment', 'pending', 'confirmed', 'cancelled', 'completed', 'no-show'],
@@ -48,12 +51,16 @@ const reservationSchema = new mongoose.Schema({
     currency: { type: String, default: 'eur' },
     status: {
       type: String,
-      enum: ['none', 'awaiting', 'paid', 'refunded', 'deducted', 'failed'],
+      enum: ['none', 'awaiting', 'paid', 'refund_pending', 'refunded', 'deducted', 'failed'],
       default: 'none'
     },
+    checkoutAttempt: { type: Number, default: 0, min: 0 },
     stripeSessionId: { type: String, default: null },
+    stripeCheckoutUrl: { type: String, default: null },
     stripePaymentIntentId: { type: String, default: null },
+    stripeRefundId: { type: String, default: null },
     paidAt: { type: Date, default: null },
+    refundRequestedAt: { type: Date, default: null },
     refundedAt: { type: Date, default: null },
     deductedAt: { type: Date, default: null },
     expiresAt: { type: Date, default: null }
@@ -92,5 +99,14 @@ reservationSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
+
+reservationSchema.index(
+  { bookingRequestKey: 1 },
+  { unique: true, partialFilterExpression: { bookingRequestKey: { $type: 'string' } } }
+);
+reservationSchema.index(
+  { activeBookingKey: 1 },
+  { unique: true, partialFilterExpression: { activeBookingKey: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('Reservation', reservationSchema);

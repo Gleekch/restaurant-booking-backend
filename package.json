@@ -9,6 +9,7 @@
     "start": "node backend/server.js",
     "desktop": "node desktop/start-electron.js",
     "test": "jest",
+    "db:ensure-indexes": "node scripts/ensure-reservation-indexes.js",
     "build-win": "electron-builder --win",
     "dist": "electron-builder"
   },
@@ -35,21 +36,15 @@
   },
   "build": {
     "appId": "com.aumurmuredesflots.reservation",
+    "afterPack": "scripts/after-pack-desktop.js",
     "productName": "Au Murmure des Flots - Réservations",
     "directories": {
       "output": "dist"
     },
     "files": [
-      ".env.example",
       "desktop/**/*",
       "assets/**/*",
       "node_modules/**/*"
-    ],
-    "extraResources": [
-      {
-        "from": ".env",
-        "to": ".env"
-      }
     ],
     "win": {
       "target": "portable",

@@ -535,6 +535,7 @@ function getDepositText(reservation) {
     const labels = {
         awaiting: '⏳ non payées',
         paid: `💶 ${amount} payées`,
+        refund_pending: '⏳ remboursement en cours',
         deducted: `✓ déduites (${amount})`,
         refunded: '↩ remboursées',
         failed: '⚠ non abouti'
