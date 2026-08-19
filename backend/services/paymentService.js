@@ -31,6 +31,7 @@ function stableLetterSuffix(value) {
 function getDepositConfig() {
   return {
     enabled: String(process.env.DEPOSIT_ENABLED || 'false').toLowerCase() === 'true',
+    activationConfirmed: String(process.env.DEPOSIT_ACTIVATION_CONFIRMED || 'false').toLowerCase() === 'true',
     minParty: parseInt(process.env.DEPOSIT_MIN_PARTY, 10) || 6,
     perPersonCents: parseInt(process.env.DEPOSIT_PER_PERSON_CENTS, 10) || 1000,
     currency: (process.env.DEPOSIT_CURRENCY || 'eur').toLowerCase(),
@@ -40,10 +41,14 @@ function getDepositConfig() {
   };
 }
 
+function isDepositSystemActive() {
+  const config = getDepositConfig();
+  return config.enabled && config.activationConfirmed && Boolean(process.env.STRIPE_SECRET_KEY);
+}
+
 function isDepositRequired(numberOfPeople) {
   const config = getDepositConfig();
-  if (!config.enabled) return false;
-  if (!process.env.STRIPE_SECRET_KEY) return false;
+  if (!isDepositSystemActive()) return false;
   return parseInt(numberOfPeople, 10) >= config.minParty;
 }
 
@@ -140,6 +145,7 @@ async function expireCheckoutSession(reservation) {
 module.exports = {
   getStripe,
   getDepositConfig,
+  isDepositSystemActive,
   isDepositRequired,
   computeDepositCents,
   formatAmount,

@@ -14,7 +14,8 @@ const Stripe = require('stripe');
 const {
   createCheckoutSession,
   refundDeposit,
-  expireCheckoutSession
+  expireCheckoutSession,
+  isDepositRequired
 } = require('../paymentService');
 
 describe('paymentService idempotence', () => {
@@ -25,6 +26,15 @@ describe('paymentService idempotence', () => {
     process.env.DEPOSIT_CURRENCY = 'eur';
     process.env.CHECKOUT_EXPIRY_MINUTES = '30';
     process.env.PUBLIC_SITE_URL = 'https://example.test';
+    process.env.DEPOSIT_ENABLED = 'true';
+    delete process.env.DEPOSIT_ACTIVATION_CONFIRMED;
+  });
+
+  test('garde les arrhes desactivees sans confirmation explicite', () => {
+    expect(isDepositRequired(6)).toBe(false);
+
+    process.env.DEPOSIT_ACTIVATION_CONFIRMED = 'true';
+    expect(isDepositRequired(6)).toBe(true);
   });
 
   test('reutilise une cle Checkout stable et ne force pas card', async () => {

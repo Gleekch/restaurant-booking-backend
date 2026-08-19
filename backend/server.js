@@ -10,6 +10,7 @@ require('dotenv').config();
 const { startReminderScheduler } = require('./services/reminderService');
 const { startRefundReconciliationScheduler } = require('./services/depositRefundService');
 const Reservation = require('./models/Reservation');
+const { isDepositSystemActive } = require('./services/paymentService');
 
 const app = express();
 const server = http.createServer(app);
@@ -60,6 +61,7 @@ app.get('/api/health', (req, res) => {
   res.status(databaseReady ? 200 : 503).json({
     status: databaseReady ? 'ok' : 'degraded',
     database: databaseReady ? 'connected' : 'unavailable',
+    payments: isDepositSystemActive() ? 'enabled' : 'disabled',
     commit: process.env.RENDER_GIT_COMMIT
       ? process.env.RENDER_GIT_COMMIT.slice(0, 7)
       : 'local'
