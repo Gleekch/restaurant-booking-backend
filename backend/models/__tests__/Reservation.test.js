@@ -10,7 +10,7 @@ describe('Reservation payment invariants', () => {
     expect(activeBookingIndex && activeBookingIndex[1].unique).toBe(true);
   });
 
-  test('accepte le statut intermediaire refund_pending', () => {
+  test.each(['refund_pending', 'refund_failed', 'refund_review', 'refunded'])('accepte le statut financier %s', (status) => {
     const reservation = new Reservation({
       customerName: 'Client',
       phoneNumber: '0262000000',
@@ -18,7 +18,7 @@ describe('Reservation payment invariants', () => {
       date: new Date('2026-09-01T12:00:00Z'),
       time: '12:30',
       source: 'website',
-      deposit: { required: true, status: 'refund_pending' }
+      deposit: { required: true, status }
     });
 
     expect(reservation.validateSync()).toBeUndefined();

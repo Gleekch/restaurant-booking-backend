@@ -1,5 +1,11 @@
 const nodemailer = require('nodemailer');
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[character]));
+}
+
 // SMS désactivé - Twilio non utilisé
 let twilioClient = null;
 
@@ -47,9 +53,12 @@ const emailTransporter = nodemailer.createTransport({
     pass: process.env.EMAIL_PASS
   },
   tls: {
-    rejectUnauthorized: false
+    rejectUnauthorized: true
   },
   connectionTimeout: 10000,
+  requireTLS: process.env.NODE_ENV !== 'test',
+  disableFileAccess: true,
+  disableUrlAccess: true,
   greetingTimeout: 10000,
   socketTimeout: 15000
 });
@@ -146,9 +155,9 @@ async function sendEmail(message, reservation) {
             <!-- Info client -->
             <div style="background-color: #e8f5e9; border-left: 5px solid #4caf50; padding: 20px; margin-bottom: 25px; border-radius: 5px;">
               <h2 style="color: #2e7d32; margin-top: 0; font-size: 20px;">👤 Informations Client</h2>
-              <p style="margin: 8px 0;"><strong>Nom :</strong> ${reservation.customerName}</p>
-              <p style="margin: 8px 0;"><strong>Téléphone :</strong> <a href="tel:${reservation.phoneNumber}" style="color: #1976d2; text-decoration: none;">${reservation.phoneNumber}</a></p>
-              ${reservation.email ? `<p style="margin: 8px 0;"><strong>Email :</strong> <a href="mailto:${reservation.email}" style="color: #1976d2; text-decoration: none;">${reservation.email}</a></p>` : ''}
+              <p style="margin: 8px 0;"><strong>Nom :</strong> ${escapeHtml(reservation.customerName)}</p>
+              <p style="margin: 8px 0;"><strong>Téléphone :</strong> <a href="tel:${encodeURIComponent(reservation.phoneNumber)}" style="color: #1976d2; text-decoration: none;">${escapeHtml(reservation.phoneNumber)}</a></p>
+              ${reservation.email ? `<p style="margin: 8px 0;"><strong>Email :</strong> <a href="mailto:${encodeURIComponent(reservation.email)}" style="color: #1976d2; text-decoration: none;">${escapeHtml(reservation.email)}</a></p>` : ''}
             </div>
             
             <!-- Détails réservation -->
@@ -164,13 +173,13 @@ async function sendEmail(message, reservation) {
                 <tr>
                   <td style="padding: 8px 0;"><strong>Heure :</strong></td>
                   <td style="text-align: right; font-size: 18px; color: #e65100;">
-                    ${reservation.time}
+                    ${escapeHtml(reservation.time)}
                   </td>
                 </tr>
                 <tr>
                   <td style="padding: 8px 0;"><strong>Nombre :</strong></td>
                   <td style="text-align: right; font-size: 18px; color: #e65100;">
-                    ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}
+                    ${escapeHtml(reservation.numberOfPeople)} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}
                   </td>
                 </tr>
                 ${hasPaidDeposit(reservation) ? `
@@ -189,18 +198,18 @@ async function sendEmail(message, reservation) {
             <div style="background-color: #fce4ec; border-left: 5px solid #e91e63; padding: 20px; margin-bottom: 25px; border-radius: 5px;">
               <h2 style="color: #880e4f; margin-top: 0; font-size: 20px;">💬 Demandes Spéciales</h2>
               <p style="margin: 0; font-style: italic; color: #424242;">
-                "${reservation.specialRequests}"
+                "${escapeHtml(reservation.specialRequests)}"
               </p>
             </div>
             ` : ''}
             
             <!-- Actions rapides -->
             <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 2px dashed #e0e0e0;">
-              <a href="tel:${reservation.phoneNumber}" style="display: inline-block; background-color: #4caf50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; margin: 0 10px; font-weight: bold;">
+              <a href="tel:${encodeURIComponent(reservation.phoneNumber)}" style="display: inline-block; background-color: #4caf50; color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; margin: 0 10px; font-weight: bold;">
                 📞 Appeler le client
               </a>
               ${reservation.email ? `
-              <a href="mailto:${reservation.email}" style="display: inline-block; background-color: #2196f3; color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; margin: 0 10px; font-weight: bold;">
+              <a href="mailto:${encodeURIComponent(reservation.email)}" style="display: inline-block; background-color: #2196f3; color: white; padding: 12px 30px; text-decoration: none; border-radius: 25px; margin: 0 10px; font-weight: bold;">
                 ✉️ Envoyer un email
               </a>
               ` : ''}
@@ -209,7 +218,7 @@ async function sendEmail(message, reservation) {
             <!-- Statut -->
             <div style="text-align: center; margin-top: 30px;">
               <p style="color: #9e9e9e; font-size: 12px;">
-                Réservation reçue le ${new Date().toLocaleString('fr-FR')} via ${reservation.source}
+                Réservation reçue le ${new Date().toLocaleString('fr-FR')} via ${escapeHtml(reservation.source)}
               </p>
             </div>
           </div>
@@ -250,16 +259,16 @@ async function sendPendingEmailToClient(reservation) {
           </div>
           <div style="padding: 40px 30px;">
             <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Demande de réservation reçue</h2>
-            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${reservation.customerName},</p>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${escapeHtml(reservation.customerName)},</p>
             <p style="color: #555; font-size: 16px; line-height: 1.6;">
               Nous avons bien reçu votre demande de réservation. Notre équipe va la vérifier et vous enverra une confirmation par email dans les meilleurs délais.
             </p>
             <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
               <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Votre demande</p>
               <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${dateStr}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${reservation.time}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
-              ${reservation.specialRequests ? `<p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Notes :</strong> ${reservation.specialRequests}</p>` : ''}
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${escapeHtml(reservation.time)}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${escapeHtml(reservation.numberOfPeople)} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
+              ${reservation.specialRequests ? `<p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Notes :</strong> ${escapeHtml(reservation.specialRequests)}</p>` : ''}
             </div>
             <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
               <p style="color: #8b6914; margin: 0; font-size: 14px;">
@@ -326,7 +335,7 @@ async function sendConfirmationEmailToClient(reservation) {
             <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Confirmation de réservation</h2>
             
             <p style="color: #555; font-size: 16px; line-height: 1.6;">
-              Cher(e) ${reservation.customerName},
+              Cher(e) ${escapeHtml(reservation.customerName)},
             </p>
             
             <p style="color: #555; font-size: 16px; line-height: 1.6;">
@@ -337,9 +346,9 @@ async function sendConfirmationEmailToClient(reservation) {
             <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
               <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Détails de votre réservation</p>
               <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${reservation.time}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
-              ${reservation.specialRequests ? `<p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Notes :</strong> ${reservation.specialRequests}</p>` : ''}
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${escapeHtml(reservation.time)}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${escapeHtml(reservation.numberOfPeople)} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
+              ${reservation.specialRequests ? `<p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Notes :</strong> ${escapeHtml(reservation.specialRequests)}</p>` : ''}
             </div>
             
             <!-- Message de bienvenue -->
@@ -424,15 +433,15 @@ async function sendCancellationEmailToClient(reservation) {
           </div>
           <div style="padding: 40px 30px;">
             <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Annulation de réservation</h2>
-            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${reservation.customerName},</p>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${escapeHtml(reservation.customerName)},</p>
             <p style="color: #555; font-size: 16px; line-height: 1.6;">
               Nous vous informons que votre réservation a été annulée. Nous sommes désolés pour la gêne occasionnée.
             </p>
             <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
               <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Réservation annulée</p>
               <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${dateStr}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${reservation.time}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${escapeHtml(reservation.time)}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${escapeHtml(reservation.numberOfPeople)} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
             </div>
             <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
               <p style="color: #8b6914; margin: 0; font-size: 14px;">
@@ -490,9 +499,9 @@ async function sendDepositExpiredEmailToClient(reservation) {
           </div>
           <div style="padding: 40px 30px;">
             <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Réservation non confirmée</h2>
-            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${reservation.customerName},</p>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${escapeHtml(reservation.customerName)},</p>
             <p style="color: #555; font-size: 16px; line-height: 1.6;">
-              Votre demande de réservation pour <strong>${dateStr} à ${reservation.time}</strong> (${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}) n'a pas pu être confirmée car le paiement des arrhes n'a pas été finalisé dans le délai imparti.
+              Votre demande de réservation pour <strong>${dateStr} à ${escapeHtml(reservation.time)}</strong> (${escapeHtml(reservation.numberOfPeople)} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}) n'a pas pu être confirmée car le paiement des arrhes n'a pas été finalisé dans le délai imparti.
             </p>
             <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
               <p style="color: #8b6914; margin: 0; font-size: 14px;">
@@ -556,15 +565,15 @@ async function sendDepositRequestEmailToClient(reservation, checkoutUrl) {
           </div>
           <div style="padding: 40px 30px;">
             <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Arrhes à régler</h2>
-            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${reservation.customerName},</p>
+            <p style="color: #555; font-size: 16px; line-height: 1.6;">Cher(e) ${escapeHtml(reservation.customerName)},</p>
             <p style="color: #555; font-size: 16px; line-height: 1.6;">
               Pour confirmer votre réservation, nous vous demandons de régler les arrhes en ligne en cliquant sur le bouton ci-dessous.
             </p>
             <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
               <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Votre réservation</p>
               <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${dateStr}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${reservation.time}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${reservation.numberOfPeople} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${escapeHtml(reservation.time)}</p>
+              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${escapeHtml(reservation.numberOfPeople)} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
               <p style="margin: 8px 0; font-size: 15px; color: #166534;"><strong>Arrhes :</strong> ${amountEuros} €</p>
             </div>
             <div style="text-align: center; margin: 30px 0;">
@@ -602,6 +611,8 @@ async function sendDepositRequestEmailToClient(reservation, checkoutUrl) {
 }
 
 module.exports = {
+  verifyEmailConnection: () => emailTransporter.verify(),
+  sendPendingEmailToClient,
   sendNotifications,
   sendSMS,
   sendEmail,

@@ -3,10 +3,10 @@ jest.mock('../../models/Reservation', () => ({
   findById: jest.fn(),
   find: jest.fn()
 }));
-jest.mock('../paymentService', () => ({ refundDeposit: jest.fn() }));
+jest.mock('../paymentService', () => ({ refundDeposit: jest.fn(), retrieveRefund: jest.fn() }));
 
 const Reservation = require('../../models/Reservation');
-const { refundDeposit } = require('../paymentService');
+const { refundDeposit, retrieveRefund } = require('../paymentService');
 const {
   refundReservationSafely,
   applyRefundEvent,
@@ -15,7 +15,13 @@ const {
 
 describe('depositRefundService', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
+    Reservation.findById.mockResolvedValue({ _id: 'reservation-1', deposit: {
+      status: 'refund_pending', stripePaymentIntentId: 'pi_1', stripeRefundId: null,
+      amountCents: 6000, currency: 'eur', refundVersion: 0
+    } });
+    retrieveRefund.mockResolvedValue({ id: 're_1', status: 'succeeded', payment_intent: 'pi_1',
+      amount: 6000, currency: 'eur', metadata: { reservationId: 'reservation-1' } });
     process.env.STRIPE_SECRET_KEY = 'sk_test_unit';
   });
 
@@ -83,17 +89,20 @@ describe('depositRefundService', () => {
   });
 
   test('un ancien evenement pending ne peut pas annuler un statut refunded', async () => {
-    Reservation.findOneAndUpdate.mockResolvedValueOnce(null);
-
-    await applyRefundEvent({
+    const current = { _id: 'reservation-1', deposit: { status: 'refunded',
+      stripePaymentIntentId: 'pi_1', stripeRefundId: 're_1', amountCents: 6000, currency: 'eur', refundVersion: 2 } };
+    Reservation.findById.mockResolvedValue(current);
+    Reservation.findOneAndUpdate.mockResolvedValueOnce(current);
+    const result = await applyRefundEvent({
       id: 're_1',
       status: 'pending',
+      payment_intent: 'pi_1', currency: 'eur', amount: 6000,
       metadata: { reservationId: 'reservation-1' }
     });
 
-    expect(Reservation.findOneAndUpdate.mock.calls[0][0]['deposit.status']).toEqual({
-      $in: ['paid', 'refund_pending']
-    });
+    expect(retrieveRefund).toHaveBeenCalledWith('re_1');
+    expect(result.deposit.status).toBe('refunded');
+    expect(Reservation.findOneAndUpdate.mock.calls[0][1].$set['deposit.status']).toBe('refunded');
   });
 
   test('reprend les remboursements pending sans interrompre le lot en cas d erreur', async () => {

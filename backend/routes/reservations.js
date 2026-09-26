@@ -10,6 +10,8 @@ const cancelLimiter = rateLimit({
   message: { success: false, message: 'Trop de requetes, reessayez dans une heure' }
 });
 const Reservation = require('../models/Reservation');
+const { reservationInput } = require('../services/reservationInputService');
+const { withBookingTransaction } = require('../services/bookingTransactionService');
 const { sendNotifications, sendConfirmationEmailToClient, sendCancellationEmailToClient, sendDepositRequestEmailToClient } = require('../services/notificationService');
 const {
   checkAvailability,
@@ -24,6 +26,8 @@ const {
 const { apiKey } = require('../middleware/auth');
 const {
   isDepositRequired,
+  isDepositSystemActive,
+  getPaymentReadiness,
   computeDepositCents,
   getDepositConfig,
   createCheckoutSession,
@@ -132,13 +136,18 @@ function getDayRange(date) {
 }
 
 function getPartySize(numberOfPeople) {
-  const parsed = parseInt(numberOfPeople, 10);
+  const parsed = Number(numberOfPeople);
 
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error('Nombre de couverts invalide');
   }
 
   return parsed;
+}
+
+function depositStateFilter(reservation) {
+  const status = reservation.deposit?.status || 'none';
+  return status === 'none' ? { $in: [null, 'none'] } : status;
 }
 
 function getServiceName(timeInMinutes) {
@@ -167,6 +176,7 @@ function validatePublicReservationPayload(payload) {
   }
 
   const timeInMinutes = timeToMinutes(payload.time);
+  if (timeInMinutes % 15 !== 0) throw new Error('Merci de choisir un creneau propose (toutes les 15 minutes).');
   const bounds = getServiceBounds(normalizedDate);
   const isMidi = timeInMinutes >= bounds.midiStart && timeInMinutes <= bounds.midiEnd;
   const isSoir = timeInMinutes >= bounds.soirStart && timeInMinutes <= bounds.soirEnd;
@@ -216,9 +226,14 @@ function validatePublicReservationPayload(payload) {
 }
 
 async function createReservation(req, res, options = {}) {
-  const { notify = true } = options;
-  const reservation = new Reservation(req.body);
-  await reservation.save();
+  const { notify = true, limit = CAPACITY } = options;
+  const reservation = await withBookingTransaction([req.body.date], async session => {
+    const availability = await checkAvailability(req.body.date, req.body.time, req.body.numberOfPeople, limit, null, session);
+    if (!availability.available) throw new Error('Ce creneau vient de se remplir. Merci de choisir un autre horaire.');
+    const created = new Reservation(req.body);
+    await created.save({ session });
+    return created;
+  });
 
   if (notify) {
     try {
@@ -238,6 +253,9 @@ async function createReservation(req, res, options = {}) {
 
 router.post('/desktop', apiKey, async (req, res) => {
   try {
+    req.body = reservationInput(req.body, true);
+    req.body.source = req.body.source || 'desktop';
+    if (req.body.status === 'cancelled') throw new Error('Une nouvelle reservation doit etre active.');
     const { date, time, numberOfPeople } = req.body;
     const requestedPeople = getPartySize(numberOfPeople);
     const availability = await checkAvailability(date, time, requestedPeople, CAPACITY);
@@ -267,6 +285,7 @@ router.post('/desktop', apiKey, async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
+    req.body = reservationInput(req.body);
     // Sécurité : ces champs ne doivent jamais venir du client (anti-spoofing
     // d'un statut « payé » ou d'arrhes pour contourner le paiement).
     delete req.body.status;
@@ -278,6 +297,11 @@ router.post('/', async (req, res) => {
 
     const { date, time } = req.body;
     const validation = validatePublicReservationPayload(req.body);
+    const paymentReadiness = getPaymentReadiness();
+    if (paymentReadiness.enabled && paymentReadiness.activationConfirmed
+      && !paymentReadiness.readyToActivate && validation.requestedPeople >= getDepositConfig().minParty) {
+      return res.status(503).json({ success: false, message: 'Le paiement des arrhes est temporairement indisponible. Merci d appeler le restaurant.' });
+    }
     const bookingRequestKey = getBookingRequestKey(req);
     const requestFingerprint = bookingFingerprint(req.body);
     req.body.activeBookingKey = activeBookingKey(req.body.phoneNumber, validation.normalizedDate);
@@ -355,7 +379,7 @@ router.post('/', async (req, res) => {
         expiresAt
       };
 
-      const reservation = await createReservation(req, res, { notify: false });
+      const reservation = await createReservation(req, res, { notify: false, limit: ONLINE_CAPACITY_LIMIT });
 
       try {
         const session = await createCheckoutSession(reservation);
@@ -403,7 +427,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const reservation = await createReservation(req, res);
+    const reservation = await createReservation(req, res, { limit: ONLINE_CAPACITY_LIMIT });
 
     res.status(201).json({
       success: true,
@@ -509,7 +533,13 @@ router.get('/availability', async (req, res) => {
 router.get('/', apiKey, async (req, res) => {
   try {
     const { date, status } = req.query;
-    const query = {};
+    // Unpaid online attempts stay stored for capacity and webhook handling,
+    // but are not restaurant requests until payment has been received.
+    const query = { $nor: [
+      { status: 'awaiting-payment' },
+      { source: { $in: ['website', 'mobile'] }, 'deposit.required': true,
+        'deposit.paidAt': null, 'deposit.status': { $in: ['awaiting', 'failed'] } }
+    ] };
 
     if (date) {
       const { startDate, endDate } = getDayRange(date);
@@ -559,6 +589,7 @@ router.get('/:id', apiKey, async (req, res) => {
 
 router.put('/:id', apiKey, async (req, res) => {
   try {
+    req.body = reservationInput(req.body, true);
     const existing = await Reservation.findById(req.params.id);
 
     if (!existing) {
@@ -596,6 +627,15 @@ router.put('/:id', apiKey, async (req, res) => {
       });
     }
 
+    if ((existing.status === 'awaiting-payment' && req.body.status && req.body.status !== 'awaiting-payment')
+      || (req.body.status === 'confirmed' && existing.deposit && existing.deposit.required
+        && !['paid', 'deducted'].includes(existing.deposit.status))) {
+      return res.status(400).json({
+        success: false,
+        message: 'Les arrhes doivent etre payees avant la confirmation par le restaurant.'
+      });
+    }
+
     // Une réservation annulée ne peut être que réactivée (changement de statut uniquement)
     if (existing.status === 'cancelled') {
       const allowedReactivation = req.body.status === 'pending' || req.body.status === 'confirmed';
@@ -612,26 +652,46 @@ router.put('/:id', apiKey, async (req, res) => {
     const dateChanged = date && date !== existingDate;
     const timeChanged = time && time !== existing.time;
     const peopleChanged = typeof numberOfPeople !== 'undefined' && getPartySize(numberOfPeople) !== existing.numberOfPeople;
-
-    if (dateChanged || timeChanged || peopleChanged) {
-      const checkDate = date || existingDate;
-      const checkTime = time || existing.time;
-      const checkPeople = typeof numberOfPeople !== 'undefined' ? getPartySize(numberOfPeople) : existing.numberOfPeople;
-      const availability = await checkAvailability(checkDate, checkTime, checkPeople, CAPACITY, req.params.id);
-
-      if (!availability.available) {
-        return res.status(400).json({
-          success: false,
-          message: `Creneau complet a ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts)`
-        });
-      }
+    const phoneChanged = typeof req.body.phoneNumber === 'string' && req.body.phoneNumber !== existing.phoneNumber;
+    const reactivating = existing.status === 'cancelled';
+    if (reactivating && existing.deposit && existing.deposit.required
+      && !['paid', 'deducted'].includes(existing.deposit.status)) {
+      throw new Error('Les arrhes de cette reservation doivent etre verifiees avant sa reactivation.');
     }
-
-    const reservation = await Reservation.findByIdAndUpdate(
-      req.params.id,
-      req.body,
-      { new: true, runValidators: true }
-    );
+    if ((dateChanged || timeChanged || peopleChanged) && existing.deposit && existing.deposit.status === 'awaiting') {
+      throw new Error('Annulez le lien de paiement en cours avant de modifier la date, l heure ou les couverts.');
+    }
+    const checkDate = date || existingDate;
+    const checkTime = time || existing.time;
+    const checkPeople = typeof numberOfPeople !== 'undefined' ? getPartySize(numberOfPeople) : existing.numberOfPeople;
+    const updateFilter = { _id: req.params.id, status: existing.status };
+    if (req.body.status === 'confirmed' && existing.deposit && existing.deposit.required) {
+      updateFilter['deposit.status'] = { $in: ['paid', 'deducted'] };
+    }
+    const fields = { ...req.body, updatedAt: new Date() };
+    const affectsCapacity = dateChanged || timeChanged || peopleChanged || phoneChanged || reactivating;
+    let reservation;
+    if (affectsCapacity) {
+      reservation = await withBookingTransaction([existingDate, checkDate], async session => {
+        const availability = await checkAvailability(checkDate, checkTime, checkPeople, CAPACITY, req.params.id, session);
+        if (!availability.available) throw new Error('Creneau complet : la modification depasserait la capacite.');
+        // Reject a stale edit even if a competing edit kept the same status.
+        const filter = { ...updateFilter, date: existing.date, time: existing.time,
+          numberOfPeople: existing.numberOfPeople, 'deposit.status': depositStateFilter(existing) };
+        if (['website', 'mobile'].includes(existing.source)) {
+          fields.activeBookingKey = activeBookingKey(fields.phoneNumber || existing.phoneNumber, checkDate);
+        }
+        return Reservation.findOneAndUpdate(filter, { $set: fields }, { new: true, runValidators: true, session });
+      });
+    } else {
+      reservation = await Reservation.findOneAndUpdate(updateFilter, { $set: fields }, { new: true, runValidators: true });
+    }
+    if (!reservation) {
+      return res.status(409).json({
+        success: false,
+        message: 'La reservation a change entre-temps. Rechargez avant de la modifier.'
+      });
+    }
 
     const statusChangedToConfirmed = req.body.status === 'confirmed' && existing.status !== 'confirmed';
     const restoredFromCancelled = existing.status === 'cancelled' && (req.body.status === 'pending' || req.body.status === 'confirmed');
@@ -664,17 +724,28 @@ router.put('/:id', apiKey, async (req, res) => {
 async function cancelReservationCore(reservationId) {
   let refundMessage = '';
   let refunded = false;
-  const before = await Reservation.findById(reservationId);
-  if (!before) throw new Error('Reservation non trouvee');
-  if (before.status === 'completed') throw new Error('Cette reservation ne peut plus etre annulee');
-
-  const changedReservation = await Reservation.findOneAndUpdate(
-    { _id: reservationId, status: { $nin: ['cancelled', 'completed'] } },
-    { $set: { status: 'cancelled', activeBookingKey: null } },
-    { new: true, runValidators: true }
-  );
-  let reservation = changedReservation || await Reservation.findById(reservationId);
-  const changed = Boolean(changedReservation);
+  let reservation;
+  let changed = false;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const before = await Reservation.findById(reservationId);
+    if (!before) throw new Error('Reservation non trouvee');
+    if (before.status === 'completed') throw new Error('Cette reservation ne peut plus etre annulee');
+    if (before.status === 'cancelled') { reservation = before; break; }
+    const depositStatus = before.deposit && before.deposit.status || 'none';
+    const fields = { status: 'cancelled', activeBookingKey: null };
+    if (depositStatus === 'paid' && hoursUntilReservation(before) >= getDepositConfig().cancellationHours) {
+      fields['deposit.status'] = 'refund_pending';
+      fields['deposit.refundRequestedAt'] = new Date();
+    }
+    reservation = await Reservation.findOneAndUpdate(
+      { _id: reservationId, status: before.status,
+        'deposit.status': depositStatus === 'none' ? { $in: [null, 'none'] } : depositStatus },
+      { $set: fields },
+      { new: true, runValidators: true }
+    );
+    if (reservation) { changed = true; break; }
+  }
+  if (!reservation) throw new Error('Reservation modifiee simultanement : merci de reessayer');
 
   if (reservation.deposit && reservation.deposit.status === 'awaiting') {
     try {
@@ -697,14 +768,16 @@ async function cancelReservationCore(reservationId) {
 
   if (reservation.deposit && ['paid', 'refund_pending'].includes(reservation.deposit.status)) {
     const config = getDepositConfig();
-    if (hoursUntilReservation(reservation) >= config.cancellationHours) {
+    if (reservation.deposit.status === 'refund_pending' || hoursUntilReservation(reservation) >= config.cancellationHours) {
       try {
         const refundResult = await refundReservationSafely(reservationId);
         reservation = refundResult.reservation;
         refunded = refundResult.refunded;
         refundMessage = refunded
           ? ' Arrhes remboursees.'
-          : ' Remboursement des arrhes en cours de traitement.';
+          : refundResult.needsAttention
+            ? ' Le remboursement necessite une verification par le restaurant.'
+            : ' Remboursement des arrhes en cours de traitement.';
       } catch (refundError) {
         console.error('Erreur remboursement arrhes:', refundError);
         reservation = await Reservation.findById(reservationId);
@@ -715,6 +788,9 @@ async function cancelReservationCore(reservationId) {
     }
   }
 
+  if (reservation.deposit && ['refund_failed', 'refund_review'].includes(reservation.deposit.status)) {
+    refundMessage = ' Le remboursement necessite une verification par le restaurant.';
+  }
   return { refundMessage, refunded, changed, reservation };
 }
 
@@ -831,11 +907,13 @@ router.post('/:id/deposit/refund', apiKey, async (req, res) => {
     const io = req.app.get('io');
     io.emit('update-reservation', reservation);
 
-    res.json({
-      success: true,
+    res.status(result.needsAttention ? 409 : 200).json({
+      success: !result.needsAttention,
+      needsAttention: result.needsAttention,
       alreadyRefunded: result.alreadyRefunded,
       pending: result.pending,
-      message: result.refunded ? 'Arrhes remboursees' : 'Remboursement en cours de traitement',
+      message: result.needsAttention ? 'Remboursement a verifier dans Stripe : aucune nouvelle tentative automatique'
+        : result.refunded ? 'Arrhes remboursees' : 'Remboursement en cours de traitement',
       data: reservation
     });
   } catch (error) {
@@ -847,6 +925,9 @@ router.post('/:id/deposit/refund', apiKey, async (req, res) => {
 router.post('/:id/deposit/request', apiKey, async (req, res) => {
   let claimedReservation = null;
   try {
+    if (!isDepositSystemActive()) {
+      return res.status(503).json({ success: false, message: 'Les nouvelles demandes d arrhes sont desactivees.' });
+    }
     const reservation = await Reservation.findById(req.params.id);
 
     if (!reservation) {
@@ -890,6 +971,7 @@ router.post('/:id/deposit/request', apiKey, async (req, res) => {
           'deposit.status': 'awaiting',
           'deposit.stripeSessionId': null,
           'deposit.stripeCheckoutUrl': null,
+          'deposit.checkoutParameters': null,
           'deposit.expiresAt': expiresAt
         },
         $inc: { 'deposit.checkoutAttempt': 1 }
@@ -955,14 +1037,17 @@ router.post('/:id/deposit/deducted', apiKey, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Les arrhes doivent etre payees pour etre deduites' });
     }
 
-    reservation.deposit.status = 'deducted';
-    reservation.deposit.deductedAt = new Date();
-    await reservation.save();
+    const updated = await Reservation.findOneAndUpdate(
+      { _id: reservation._id, status: { $in: ['pending', 'confirmed', 'completed'] }, 'deposit.status': 'paid' },
+      { $set: { 'deposit.status': 'deducted', 'deposit.deductedAt': new Date() } },
+      { new: true, runValidators: true }
+    );
+    if (!updated) return res.status(409).json({ success: false, message: 'Reservation ou paiement modifie entre-temps.' });
 
     const io = req.app.get('io');
-    io.emit('update-reservation', reservation);
+    io.emit('update-reservation', updated);
 
-    res.json({ success: true, message: 'Arrhes marquees comme deduites de l\'addition', data: reservation });
+    res.json({ success: true, message: 'Arrhes marquees comme deduites de l\'addition', data: updated });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -981,17 +1066,25 @@ router.post('/:id/complete', apiKey, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Seule une reservation active peut etre marquee comme terminee' });
     }
 
-    reservation.status = 'completed';
-    if (reservation.deposit && reservation.deposit.status === 'paid') {
-      reservation.deposit.status = 'deducted';
-      reservation.deposit.deductedAt = new Date();
+    if (reservation.deposit?.required && !['paid', 'deducted'].includes(reservation.deposit.status)) {
+      return res.status(400).json({ success: false, message: 'Les arrhes doivent etre payees avant de terminer la reservation.' });
     }
-    await reservation.save();
+    const fields = { status: 'completed' };
+    if (reservation.deposit && reservation.deposit.status === 'paid') {
+      fields['deposit.status'] = 'deducted';
+      fields['deposit.deductedAt'] = new Date();
+    }
+    const updated = await Reservation.findOneAndUpdate(
+      { _id: reservation._id, status: reservation.status,
+        'deposit.status': depositStateFilter(reservation) },
+      { $set: fields }, { new: true, runValidators: true }
+    );
+    if (!updated) return res.status(409).json({ success: false, message: 'Reservation ou paiement modifie entre-temps.' });
 
     const io = req.app.get('io');
-    io.emit('update-reservation', reservation);
+    io.emit('update-reservation', updated);
 
-    res.json({ success: true, message: 'Client marque comme arrive', data: reservation });
+    res.json({ success: true, message: 'Client marque comme arrive', data: updated });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -1010,18 +1103,20 @@ router.post('/:id/no-show', apiKey, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Seule une reservation active peut etre marquee en no-show' });
     }
 
-    reservation.status = 'no-show';
-    // Les arrhes restent en 'paid' (conservees par le restaurant) — aucune modification
-    await reservation.save();
+    const updated = await Reservation.findOneAndUpdate(
+      { _id: reservation._id, status: reservation.status },
+      { $set: { status: 'no-show' } }, { new: true, runValidators: true }
+    );
+    if (!updated) return res.status(409).json({ success: false, message: 'Reservation modifiee entre-temps.' });
 
     const io = req.app.get('io');
-    io.emit('update-reservation', reservation);
+    io.emit('update-reservation', updated);
 
-    const kept = reservation.deposit && reservation.deposit.status === 'paid';
+    const kept = updated.deposit && updated.deposit.status === 'paid';
     res.json({
       success: true,
       message: `Reservation marquee en no-show.${kept ? ' Arrhes conservees.' : ''}`,
-      data: reservation
+      data: updated
     });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });

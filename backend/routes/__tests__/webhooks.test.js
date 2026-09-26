@@ -6,6 +6,7 @@ jest.mock('../../services/notificationService', () => ({
   sendEmail: jest.fn(() => Promise.resolve()),
   formatReservationMessage: jest.fn(() => 'message'),
   sendConfirmationEmailToClient: jest.fn(() => Promise.resolve()),
+  sendPendingEmailToClient: jest.fn(() => Promise.resolve()),
   sendDepositExpiredEmailToClient: jest.fn(() => Promise.resolve())
 }));
 jest.mock('../../services/paymentService', () => ({
@@ -57,6 +58,20 @@ describe('webhook Checkout anti-doublon', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.EMAIL_USER;
+  });
+
+  test('payment waits for restaurant confirmation and sends only an acknowledgement', async () => {
+    const before = reservation();
+    const after = reservation({ status: 'pending', deposit: { ...before.deposit, status: 'paid' } });
+    Reservation.findById.mockResolvedValue(before);
+    Reservation.findOneAndUpdate.mockResolvedValue(after);
+    const io = { emit: jest.fn() };
+    await handleCheckoutPaid(session(), io);
+    expect(Reservation.findOneAndUpdate.mock.calls[0][1].$set.status).toBe('pending');
+    expect(notificationService.sendPendingEmailToClient).toHaveBeenCalledWith(after);
+    expect(notificationService.sendConfirmationEmailToClient).not.toHaveBeenCalled();
+    expect(io.emit).toHaveBeenCalledWith('new-reservation', after);
+    expect(io.emit).toHaveBeenCalledWith('update-reservation', after);
   });
 
   test('refuse une ancienne session Checkout', async () => {

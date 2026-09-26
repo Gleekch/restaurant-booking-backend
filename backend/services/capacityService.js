@@ -22,6 +22,10 @@ function parseDateInput(date) {
   }
 
   const [year, month, day] = date.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) {
+    throw new Error('Date invalide. Jour inexistant.');
+  }
   return { year, month, day };
 }
 
@@ -106,7 +110,7 @@ function getMealDuration(timeMinutes) {
   return isMidiTime(timeMinutes) ? MIDI_DURATION : SOIR_DURATION;
 }
 
-async function getOccupancyMap(date, excludeId) {
+async function getOccupancyMap(date, excludeId, session) {
   const startOfDay = buildUtcDate(date, 0, 0, 0, 0);
   const endOfDay = buildUtcDate(date, 23, 59, 59, 999);
 
@@ -119,7 +123,8 @@ async function getOccupancyMap(date, excludeId) {
     query._id = { $ne: excludeId };
   }
 
-  const reservations = await Reservation.find(query);
+  const request = Reservation.find(query);
+  const reservations = await (session ? request.session(session) : request);
   const occupancy = {};
   const arrivals = {};
 
@@ -128,9 +133,10 @@ async function getOccupancyMap(date, excludeId) {
     const duration = getMealDuration(startMin);
     const endMin = startMin + duration;
 
-    arrivals[startMin] = (arrivals[startMin] || 0) + reservation.numberOfPeople;
+    const arrivalSlot = Math.floor(startMin / 15) * 15;
+    arrivals[arrivalSlot] = (arrivals[arrivalSlot] || 0) + reservation.numberOfPeople;
 
-    for (let slot = startMin; slot < endMin; slot += 15) {
+    for (let slot = startMin; slot < endMin; slot += 1) {
       occupancy[slot] = (occupancy[slot] || 0) + reservation.numberOfPeople;
     }
   }
@@ -138,20 +144,20 @@ async function getOccupancyMap(date, excludeId) {
   return { occupancy, arrivals, reservations };
 }
 
-async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
-  const requestedPeople = parseInt(numberOfPeople, 10);
+async function checkAvailability(date, time, numberOfPeople, limit, excludeId, session) {
+  const requestedPeople = Number(numberOfPeople);
 
   if (!Number.isInteger(requestedPeople) || requestedPeople <= 0) {
     throw new Error('Nombre de couverts invalide');
   }
 
   const effectiveLimit = Math.min(limit || CAPACITY, CAPACITY);
-  const { occupancy, arrivals } = await getOccupancyMap(date, excludeId);
+  const { occupancy, arrivals } = await getOccupancyMap(date, excludeId, session);
   const startMin = timeToMinutes(time);
 
   // Vérification 1 : limite d'arrivées par créneau — uniquement pour les réservations en ligne
   if (effectiveLimit < CAPACITY) {
-    const slotArrivals = (arrivals[startMin] || 0) + requestedPeople;
+    const slotArrivals = (arrivals[Math.floor(startMin / 15) * 15] || 0) + requestedPeople;
     if (slotArrivals > SLOT_HARD_LIMIT) {
       const h = String(Math.floor(startMin / 60)).padStart(2, '0');
       const m = String(startMin % 60).padStart(2, '0');
@@ -170,7 +176,7 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId) {
   let peakOccupancy = 0;
   let peakSlot = startMin;
 
-  for (let slot = startMin; slot < endMin; slot += 15) {
+  for (let slot = startMin; slot < endMin; slot += 1) {
     const current = (occupancy[slot] || 0) + requestedPeople;
     if (current > peakOccupancy) {
       peakOccupancy = current;
@@ -230,7 +236,7 @@ async function getAvailableSlots(date, numberOfPeople, limit) {
       return false;
     }
 
-    for (let slot = startMin; slot < startMin + duration; slot += 15) {
+    for (let slot = startMin; slot < startMin + duration; slot += 1) {
       if ((occupancy[slot] || 0) + requestedPeople > effectiveLimit) {
         return false;
       }

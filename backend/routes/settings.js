@@ -112,6 +112,35 @@ router.post('/availability', async (req, res) => {
 
 // Mettre à jour les paramètres (protégé par API key)
 const { apiKey } = require('../middleware/auth');
+const { getPaymentReadiness, getPublicDepositPolicy } = require('../services/paymentService');
+
+router.get('/deposit-policy', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const readiness = getPaymentReadiness();
+  if (readiness.enabled && readiness.activationConfirmed && !readiness.readyToActivate) {
+    return res.status(503).json({ success: false, message: 'Paiement temporairement indisponible' });
+  }
+  res.json({ success: true, data: getPublicDepositPolicy() });
+});
+
+router.get('/production-readiness', apiKey, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const payment = getPaymentReadiness();
+  let smtp = { configured: Boolean(process.env.EMAIL_USER && process.env.EMAIL_PASS), verified: false };
+  if (req.query.verifySmtp === '1') {
+    try {
+      if (!smtp.configured) throw Object.assign(new Error('SMTP not configured'), { code: 'NOT_CONFIGURED' });
+      await require('../services/notificationService').verifyEmailConnection();
+      smtp.verified = true;
+    } catch (error) {
+      // Never return provider messages, credentials or email addresses.
+      smtp.code = ['EAUTH', 'ECONNECTION', 'ETIMEDOUT', 'ESOCKET', 'NOT_CONFIGURED'].includes(error.code)
+        ? error.code : 'SMTP_CHECK_FAILED';
+    }
+  }
+  res.json({ success: true, data: { payment, policy: getPublicDepositPolicy(), smtp } });
+});
+
 router.put('/', apiKey, (req, res) => {
   settings = { ...settings, ...req.body };
   res.json({

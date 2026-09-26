@@ -5,10 +5,10 @@ const Reservation = require('../models/Reservation');
 const {
   sendEmail,
   formatReservationMessage,
-  sendConfirmationEmailToClient,
+  sendPendingEmailToClient,
   sendDepositExpiredEmailToClient
 } = require('../services/notificationService');
-const { getStripe } = require('../services/paymentService');
+const { getStripe, getStripeMode } = require('../services/paymentService');
 const { refundReservationSafely, applyRefundEvent } = require('../services/depositRefundService');
 
 function paymentIntentId(session) {
@@ -48,47 +48,53 @@ async function handleCheckoutPaid(session, io) {
   if (session.payment_status !== 'paid') return { awaitingAsyncPayment: true };
 
   const { reservationId, checkoutAttempt } = getCheckoutIdentity(session);
-  const before = await Reservation.findById(reservationId);
-  if (!before) throw new Error(`Reservation ${reservationId} introuvable pour le paiement ${session.id}`);
-
-  validateCheckoutSession(session, before, checkoutAttempt);
   const intentId = paymentIntentId(session);
-  const onlineFlow = before.status === 'awaiting-payment';
-  const paidAfterCancellation = before.status === 'cancelled';
-  const setFields = {
-    'deposit.status': 'paid',
-    'deposit.stripeSessionId': session.id,
-    'deposit.stripePaymentIntentId': intentId,
-    'deposit.paidAt': new Date()
-  };
-  if (onlineFlow) setFields.status = 'confirmed';
-
-  const reservation = await Reservation.findOneAndUpdate(
-    {
-      _id: reservationId,
-      'deposit.status': 'awaiting',
-      'deposit.checkoutAttempt': checkoutAttempt,
-      $or: [
-        { 'deposit.stripeSessionId': session.id },
-        { 'deposit.stripeSessionId': null }
-      ]
-    },
-    { $set: setFields },
-    { new: true, runValidators: true }
-  );
-
-  if (!reservation) {
-    const current = await Reservation.findById(reservationId);
-    const samePayment = current && current.deposit
-      && current.deposit.stripePaymentIntentId === intentId
-      && ['paid', 'refund_pending', 'refunded', 'deducted'].includes(current.deposit.status);
-    if (samePayment) return { duplicate: true, reservation: current };
-    throw new Error(`Transition de paiement refusee pour la reservation ${reservationId}`);
+  let reservation;
+  let onlineFlow = false;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const before = await Reservation.findById(reservationId);
+    if (!before) throw new Error(`Reservation ${reservationId} introuvable pour le paiement ${session.id}`);
+    validateCheckoutSession(session, before, checkoutAttempt);
+    const samePayment = before.deposit.stripePaymentIntentId === intentId
+      && ['paid', 'refund_pending', 'refund_failed', 'refund_review', 'refunded', 'deducted'].includes(before.deposit.status);
+    if (samePayment) {
+      if (before.deposit.status === 'refund_pending') {
+        const result = await refundReservationSafely(reservationId);
+        if (io) io.emit('update-reservation', result.reservation);
+        return { duplicate: true, reservation: result.reservation };
+      }
+      return { duplicate: true, reservation: before };
+    }
+    const cancelled = before.status === 'cancelled';
+    if (before.deposit.status !== 'awaiting' && !(cancelled && before.deposit.status === 'failed')) {
+      throw new Error(`Transition de paiement refusee pour la reservation ${reservationId}`);
+    }
+    onlineFlow = before.status === 'awaiting-payment';
+    const setFields = {
+      'deposit.status': cancelled ? 'refund_pending' : 'paid',
+      'deposit.stripeSessionId': session.id,
+      'deposit.stripePaymentIntentId': intentId,
+      'deposit.paidAt': new Date()
+    };
+    if (onlineFlow) setFields.status = 'pending';
+    // Record the refund obligation in the SAME write as the late payment.
+    // A process crash or webhook replay can then resume it via reconciliation.
+    if (cancelled) setFields['deposit.refundRequestedAt'] = new Date();
+    reservation = await Reservation.findOneAndUpdate(
+      { _id: reservationId, status: before.status,
+        'deposit.status': before.deposit.status,
+        'deposit.checkoutAttempt': checkoutAttempt,
+        $or: [{ 'deposit.stripeSessionId': session.id }, { 'deposit.stripeSessionId': null }] },
+      { $set: setFields },
+      { new: true, runValidators: true }
+    );
+    if (reservation) break;
   }
+  if (!reservation) throw new Error('Paiement modifie simultanement : rejouer le webhook');
 
   // Un paiement qui gagne la course avec une annulation est immédiatement
   // remboursé avec la même protection d'idempotence.
-  if (paidAfterCancellation) {
+  if (reservation.status === 'cancelled') {
     const refundResult = await refundReservationSafely(reservationId);
     if (io) io.emit('update-reservation', refundResult.reservation);
     return { reservation: refundResult.reservation, refundedAfterCancellation: true };
@@ -101,11 +107,16 @@ async function handleCheckoutPaid(session, io) {
       );
     }
     if (reservation.email) {
-      sendConfirmationEmailToClient(reservation).catch(err =>
-        console.error('Erreur email confirmation client post-paiement:', err.message)
+      sendPendingEmailToClient(reservation).catch(err =>
+        console.error('Erreur email demande client post-paiement:', err.message)
       );
     }
-    if (io) io.emit('new-reservation', reservation);
+    if (io) {
+      io.emit('new-reservation', reservation);
+      // Existing desktop clients may already have loaded the awaiting booking.
+      // Keep the creation event for unseen bookings and refresh cached ones too.
+      io.emit('update-reservation', reservation);
+    }
   } else if (io) {
     io.emit('update-reservation', reservation);
   }
@@ -181,9 +192,13 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req, re
   let event;
   try {
     event = getStripe().webhooks.constructEvent(req.body, signature, webhookSecret);
+    const mode = getStripeMode();
+    if (!mode || typeof event.livemode !== 'boolean' || event.livemode !== (mode === 'live')) {
+      throw new Error('Mode Stripe incompatible avec la configuration du serveur');
+    }
   } catch (error) {
     console.error('Signature webhook Stripe invalide:', error.message);
-    return res.status(400).send(`Webhook Error: ${error.message}`);
+    return res.status(400).send('Webhook Stripe invalide');
   }
 
   try {

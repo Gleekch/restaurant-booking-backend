@@ -197,6 +197,11 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  mainWindow.webContents.on('did-finish-load', () => {
+    sendToRenderer(socket && socket.connected ? 'backend-connected' : 'backend-disconnected');
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -274,7 +279,7 @@ app.on('activate', () => {
 ipcMain.handle('get-config', async () => ({
   backendUrl: BACKEND_URL,
   hasApiKey: Boolean(API_KEY),
-  hasCredentials: Boolean(API_KEY || (ADMIN_USER && ADMIN_PASS))
+  hasCredentials: Boolean(API_KEY)
 }));
 
 ipcMain.handle('get-reservations', async (_event, filters = {}) => {

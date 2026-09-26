@@ -1,3 +1,13 @@
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[character]));
+}
+
+function safeReservationId(value) {
+    return /^[a-f0-9]{24}$/i.test(String(value)) ? String(value) : '';
+}
+
 // Configuration
 const API_URL = window.location.origin;
 let reservations = [];
@@ -503,6 +513,8 @@ function depositBadge(r) {
     if (!d || !d.required) return '';
     const amount = formatEuros(d.amountCents);
     const map = {
+        refund_failed: `<span class='deposit-badge failed'>Remboursement echoue - verification necessaire</span>`,
+        refund_review: `<span class='deposit-badge failed'>Remboursement a verifier dans Stripe</span>`,
         awaiting: `<span class="deposit-badge awaiting">⏳ Arrhes non payées</span>`,
         paid:     `<span class="deposit-badge paid">💶 Arrhes ${amount} payées</span>`,
         refund_pending: `<span class="deposit-badge awaiting">⏳ Remboursement en cours</span>`,
@@ -519,32 +531,32 @@ function depositActions(r) {
     if (d.status === 'refund_pending') {
         return `
         <div class="deposit-actions">
-            <button class="btn-deposit-refund" onclick="refundDepositReservation('${r._id}', true)">Vérifier / relancer</button>
+            <button class="btn-deposit-refund" onclick="refundDepositReservation('${safeReservationId(r._id)}', true)">Vérifier / relancer</button>
         </div>`;
     }
     if (d.status !== 'paid') return '';
     return `
         <div class="deposit-actions">
-            <button class="btn-deposit-deduct" onclick="markDepositDeducted('${r._id}')">Déduire de l'addition</button>
-            <button class="btn-deposit-refund" onclick="refundDepositReservation('${r._id}')">Rembourser</button>
+            <button class="btn-deposit-deduct" onclick="markDepositDeducted('${safeReservationId(r._id)}')">Déduire de l'addition</button>
+            <button class="btn-deposit-refund" onclick="refundDepositReservation('${safeReservationId(r._id)}')">Rembourser</button>
         </div>`;
 }
 
 function renderReservationCard(r) {
     const badge = depositBadge(r);
     return `
-        <div class="reservation-card status-${r.status}" data-id="${r._id}">
+        <div class="reservation-card status-${escapeHtml(r.status)}" data-id="${safeReservationId(r._id)}">
             <div class="card-header">
-                <span class="card-time">${r.time}</span>
-                <span class="card-status ${r.status}">${STATUS_TEXT[r.status] || r.status}</span>
+                <span class="card-time">${escapeHtml(r.time)}</span>
+                <span class="card-status ${escapeHtml(r.status)}">${escapeHtml(STATUS_TEXT[r.status] || r.status)}</span>
             </div>
-            <div class="card-name">${r.customerName}</div>
+            <div class="card-name">${escapeHtml(r.customerName)}</div>
             <div class="card-info">
-                <span><span class="icon">👥</span> ${r.numberOfPeople}</span>
-                <span><span class="icon">📱</span> ${r.phoneNumber}</span>
+                <span><span class="icon">👥</span> ${escapeHtml(r.numberOfPeople)}</span>
+                <span><span class="icon">📱</span> ${escapeHtml(r.phoneNumber)}</span>
             </div>
             ${badge ? `<div class="card-deposit">${badge}</div>` : ''}
-            ${r.specialRequests ? `<div class="card-notes"><span class="icon">💬</span> ${r.specialRequests}</div>` : ''}
+            ${r.specialRequests ? `<div class="card-notes"><span class="icon">💬</span> ${escapeHtml(r.specialRequests)}</div>` : ''}
             ${depositActions(r)}
         </div>
     `;
@@ -559,19 +571,19 @@ function renderPendingCard(r) {
     return `
         <div class="pending-card">
             <div class="pending-card-header">
-                <span class="pending-card-name">${r.customerName}</span>
+                <span class="pending-card-name">${escapeHtml(r.customerName)}</span>
                 <span class="card-status pending">En attente</span>
             </div>
             <div class="pending-card-info">
-                <p><span class="icon">📅</span> ${dateStr} - ${r.time} ${service}</p>
-                <p><span class="icon">👥</span> ${r.numberOfPeople} personne(s)</p>
-                <p><span class="icon">📱</span> ${r.phoneNumber}</p>
+                <p><span class="icon">📅</span> ${dateStr} - ${escapeHtml(r.time)} ${service}</p>
+                <p><span class="icon">👥</span> ${escapeHtml(r.numberOfPeople)} personne(s)</p>
+                <p><span class="icon">📱</span> ${escapeHtml(r.phoneNumber)}</p>
                 ${depositBadge(r) ? `<p>${depositBadge(r)}</p>` : ''}
-                ${r.specialRequests ? `<p><span class="icon">💬</span> ${r.specialRequests}</p>` : ''}
+                ${r.specialRequests ? `<p><span class="icon">💬</span> ${escapeHtml(r.specialRequests)}</p>` : ''}
             </div>
             <div class="pending-actions">
-                <button class="btn-confirm" onclick="updateStatus('${r._id}', 'confirmed')"><span class="icon">✅</span> Confirmer</button>
-                <button class="btn-cancel" onclick="updateStatus('${r._id}', 'cancelled')"><span class="icon">❌</span> Annuler</button>
+                <button class="btn-confirm" onclick="updateStatus('${safeReservationId(r._id)}', 'confirmed')"><span class="icon">✅</span> Confirmer</button>
+                <button class="btn-cancel" onclick="updateStatus('${safeReservationId(r._id)}', 'cancelled')"><span class="icon">❌</span> Annuler</button>
             </div>
         </div>
     `;
@@ -701,6 +713,8 @@ function showReservationDetail(r) {
         awaiting: 'En attente de paiement',
         paid: 'Payées',
         refund_pending: 'Remboursement en cours',
+        refund_failed: 'Remboursement echoue - verification necessaire',
+        refund_review: 'Remboursement a verifier dans Stripe',
         deducted: 'Déduites de l\'addition',
         refunded: 'Remboursées',
         failed: 'Non abouti'
@@ -709,7 +723,7 @@ function showReservationDetail(r) {
     const depositRow = (d && d.required) ? `
             <div class="detail-row">
                 <span class="detail-label">Arrhes</span>
-                <span class="detail-value"><strong>${formatEuros(d.amountCents)}</strong> — ${depositLabels[d.status] || d.status}</span>
+                <span class="detail-value"><strong>${formatEuros(d.amountCents)}</strong> — ${escapeHtml(depositLabels[d.status] || d.status)}</span>
             </div>
     ` : '';
 
@@ -718,7 +732,7 @@ function showReservationDetail(r) {
         <div class="detail-section">
             <div class="detail-row">
                 <span class="detail-label">Statut</span>
-                <span class="card-status ${r.status}">${statusText[r.status]}</span>
+                <span class="card-status ${escapeHtml(r.status)}">${escapeHtml(statusText[r.status])}</span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Date</span>
@@ -726,46 +740,46 @@ function showReservationDetail(r) {
             </div>
             <div class="detail-row">
                 <span class="detail-label">Heure</span>
-                <span class="detail-value">${r.time}</span>
+                <span class="detail-value">${escapeHtml(r.time)}</span>
             </div>
             <div class="detail-row">
                 <span class="detail-label">Personnes</span>
-                <span class="detail-value">${r.numberOfPeople}</span>
+                <span class="detail-value">${escapeHtml(r.numberOfPeople)}</span>
             </div>
             ${depositRow}
             <div class="detail-row">
                 <span class="detail-label">Téléphone</span>
-                <span class="detail-value"><a href="tel:${r.phoneNumber}">${r.phoneNumber}</a></span>
+                <span class="detail-value"><a href="tel:${encodeURIComponent(r.phoneNumber)}">${escapeHtml(r.phoneNumber)}</a></span>
             </div>
             ${r.email ? `
                 <div class="detail-row">
                     <span class="detail-label">Email</span>
-                    <span class="detail-value"><a href="mailto:${r.email}">${r.email}</a></span>
+                    <span class="detail-value"><a href="mailto:${encodeURIComponent(r.email)}">${escapeHtml(r.email)}</a></span>
                 </div>
             ` : ''}
             ${r.specialRequests ? `
                 <div class="detail-row">
                     <span class="detail-label">Notes</span>
-                    <span class="detail-value">${r.specialRequests}</span>
+                    <span class="detail-value">${escapeHtml(r.specialRequests)}</span>
                 </div>
             ` : ''}
         </div>
 
         <div class="detail-actions">
             ${r.status !== 'confirmed' ? `
-                <button class="btn btn-success" onclick="updateStatus('${r._id}', 'confirmed'); closeModal();"><span class="icon">✅</span> Confirmer</button>
+                <button class="btn btn-success" onclick="updateStatus('${safeReservationId(r._id)}', 'confirmed'); closeModal();"><span class="icon">✅</span> Confirmer</button>
             ` : ''}
             ${!['cancelled', 'awaiting-payment'].includes(r.status) ? `
-                <button class="btn btn-danger" onclick="updateStatus('${r._id}', 'cancelled'); closeModal();"><span class="icon">❌</span> Annuler</button>
+                <button class="btn btn-danger" onclick="updateStatus('${safeReservationId(r._id)}', 'cancelled'); closeModal();"><span class="icon">❌</span> Annuler</button>
             ` : ''}
             ${r.email && ['pending','confirmed'].includes(r.status) && (!r.deposit || r.deposit.status === 'none' || r.deposit.status === 'failed') ? `
-                <button class="btn btn-deposit-request" onclick="requestDeposit('${r._id}')">💶 Demander les arrhes</button>
+                <button class="btn btn-deposit-request" onclick="requestDeposit('${safeReservationId(r._id)}')">💶 Demander les arrhes</button>
             ` : ''}
             ${['pending','confirmed'].includes(r.status) ? `
-                <button class="btn btn-success" onclick="markCompleted('${r._id}')"><span class="icon">🍽️</span> Client arrivé</button>
-                <button class="btn btn-warning" onclick="markNoShow('${r._id}')"><span class="icon">🚫</span> No-show</button>
+                <button class="btn btn-success" onclick="markCompleted('${safeReservationId(r._id)}')"><span class="icon">🍽️</span> Client arrivé</button>
+                <button class="btn btn-warning" onclick="markNoShow('${safeReservationId(r._id)}')"><span class="icon">🚫</span> No-show</button>
             ` : ''}
-            <button class="btn btn-secondary" onclick="openEditForm('${r._id}')">✏️ Modifier</button>
+            <button class="btn btn-secondary" onclick="openEditForm('${safeReservationId(r._id)}')">✏️ Modifier</button>
             <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
         </div>
     `;
@@ -785,15 +799,15 @@ function openEditForm(id) {
         <form id="edit-reservation-form">
             <div class="form-group">
                 <label>Nom du client *</label>
-                <input type="text" id="edit-name" value="${r.customerName}" required>
+                <input type="text" id="edit-name" value="${escapeHtml(r.customerName)}" required>
             </div>
             <div class="form-group">
                 <label>Téléphone *</label>
-                <input type="tel" id="edit-phone" value="${r.phoneNumber}" required>
+                <input type="tel" id="edit-phone" value="${escapeHtml(r.phoneNumber)}" required>
             </div>
             <div class="form-group">
                 <label>Email</label>
-                <input type="email" id="edit-email" value="${r.email || ''}">
+                <input type="email" id="edit-email" value="${escapeHtml(r.email || '')}">
             </div>
             <div class="form-row">
                 <div class="form-group">
@@ -802,12 +816,12 @@ function openEditForm(id) {
                 </div>
                 <div class="form-group">
                     <label>Heure *</label>
-                    <input type="time" id="edit-time" value="${r.time}" required>
+                    <input type="time" id="edit-time" value="${escapeHtml(r.time)}" required>
                 </div>
             </div>
             <div class="form-group">
                 <label>Nombre de personnes *</label>
-                <input type="number" id="edit-people" min="1" value="${r.numberOfPeople}" required>
+                <input type="number" id="edit-people" min="1" value="${escapeHtml(r.numberOfPeople)}" required>
             </div>
             <div class="form-group">
                 <label>Statut</label>
@@ -819,11 +833,11 @@ function openEditForm(id) {
             </div>
             <div class="form-group">
                 <label>Notes / Demandes spéciales</label>
-                <textarea id="edit-requests" rows="3">${r.specialRequests || ''}</textarea>
+                <textarea id="edit-requests" rows="3">${escapeHtml(r.specialRequests || '')}</textarea>
             </div>
             <div class="detail-actions">
                 <button type="submit" class="btn btn-primary">Enregistrer</button>
-                <button type="button" class="btn btn-secondary" onclick="showReservationDetail(reservations.find(r => r._id === '${id}'))">Annuler</button>
+                <button type="button" class="btn btn-secondary" onclick="showReservationDetail(reservations.find(r => r._id === '${safeReservationId(id)}'))">Annuler</button>
             </div>
         </form>
     `;
@@ -978,7 +992,7 @@ async function confirmAllPending() {
     let success = 0;
     for (const r of pending) {
         try {
-            const response = await apiFetch(`${API_URL}/api/reservations/${r._id}`, {
+            const response = await apiFetch(`${API_URL}/api/reservations/${safeReservationId(r._id)}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ status: 'confirmed' })

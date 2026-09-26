@@ -1,3 +1,13 @@
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[character]));
+}
+
+function safeReservationId(value) {
+    return /^[a-f0-9]{24}$/i.test(String(value)) ? String(value) : '';
+}
+
 const api = window.api;
 const ipcRenderer = {
     on(eventName, callback) {
@@ -231,9 +241,12 @@ ipcRenderer.on('new-reservation', (event, reservation) => {
 ipcRenderer.on('update-reservation', (event, reservation) => {
     const index = reservations.findIndex(r => r._id === reservation._id);
     if (index !== -1) {
-        reservations[index] = reservation;
+        Object.assign(reservations[index], reservation);
         displayReservations();
         updateStats();
+        if (modal.style.display === 'block' && modal.dataset.reservationId === reservation._id) {
+            showReservationDetails(reservations[index]);
+        }
     }
 });
 
@@ -241,9 +254,12 @@ ipcRenderer.on('update-reservation', (event, reservation) => {
 ipcRenderer.on('cancel-reservation', (event, reservation) => {
     const index = reservations.findIndex(r => r._id === reservation._id);
     if (index !== -1) {
-        reservations[index].status = 'cancelled';
+        Object.assign(reservations[index], reservation);
         displayReservations();
         updateStats();
+        if (modal.style.display === 'block' && modal.dataset.reservationId === reservation._id) {
+            showReservationDetails(reservations[index]);
+        }
     }
 });
 
@@ -479,21 +495,21 @@ function createReservationCard(reservation) {
     card.className = 'reservation-card';
     card.innerHTML = `
         <div class="reservation-header">
-            <div class="reservation-time">${reservation.time}</div>
-            <span class="reservation-status status-${reservation.status}">${getStatusText(reservation.status)}</span>
+            <div class="reservation-time">${escapeHtml(reservation.time)}</div>
+            <span class="reservation-status status-${escapeHtml(reservation.status)}">${escapeHtml(getStatusText(reservation.status))}</span>
         </div>
         <div class="reservation-info">
             <div class="info-row">
                 <span class="info-label">Nom:</span>
-                <strong>${reservation.customerName}</strong>
+                <strong>${escapeHtml(reservation.customerName)}</strong>
             </div>
             <div class="info-row">
                 <span class="info-label">Téléphone:</span>
-                ${reservation.phoneNumber}
+                ${escapeHtml(reservation.phoneNumber)}
             </div>
             <div class="info-row">
                 <span class="info-label">Personnes:</span>
-                ${reservation.numberOfPeople}
+                ${escapeHtml(reservation.numberOfPeople)}
             </div>
             ${getDepositText(reservation) ? `
             <div class="info-row">
@@ -504,7 +520,7 @@ function createReservationCard(reservation) {
             ${reservation.specialRequests ? `
             <div class="info-row">
                 <span class="info-label">Notes:</span>
-                ${reservation.specialRequests}
+                ${escapeHtml(reservation.specialRequests)}
             </div>
             ` : ''}
         </div>
@@ -536,6 +552,8 @@ function getDepositText(reservation) {
         awaiting: '⏳ non payées',
         paid: `💶 ${amount} payées`,
         refund_pending: '⏳ remboursement en cours',
+        refund_failed: 'Remboursement echoue - verification necessaire',
+        refund_review: 'Remboursement a verifier dans Stripe',
         deducted: `✓ déduites (${amount})`,
         refunded: '↩ remboursées',
         failed: '⚠ non abouti'
@@ -545,19 +563,20 @@ function getDepositText(reservation) {
 
 // Afficher les détails de la réservation
 function showReservationDetails(reservation) {
+    modal.dataset.reservationId = reservation._id;
     const details = document.getElementById('reservation-details');
     details.innerHTML = `
-        <p><strong>Client:</strong> ${reservation.customerName}</p>
-        <p><strong>Téléphone:</strong> ${reservation.phoneNumber}</p>
-        <p><strong>Email:</strong> ${reservation.email || 'Non renseigné'}</p>
+        <p><strong>Client:</strong> ${escapeHtml(reservation.customerName)}</p>
+        <p><strong>Téléphone:</strong> ${escapeHtml(reservation.phoneNumber)}</p>
+        <p><strong>Email:</strong> ${escapeHtml(reservation.email || 'Non renseigné')}</p>
         <p><strong>Date:</strong> ${new Date(reservation.date).toLocaleDateString('fr-FR')}</p>
-        <p><strong>Heure:</strong> ${reservation.time}</p>
-        <p><strong>Nombre de personnes:</strong> ${reservation.numberOfPeople}</p>
+        <p><strong>Heure:</strong> ${escapeHtml(reservation.time)}</p>
+        <p><strong>Nombre de personnes:</strong> ${escapeHtml(reservation.numberOfPeople)}</p>
         ${getDepositText(reservation) ? `<p><strong>Arrhes:</strong> ${getDepositText(reservation)}</p>` : ''}
-        <p><strong>Statut:</strong> ${getStatusText(reservation.status)}</p>
-        <p><strong>Source:</strong> ${reservation.source}</p>
-        ${reservation.specialRequests ? `<p><strong>Demandes spéciales:</strong> ${reservation.specialRequests}</p>` : ''}
-        ${reservation.notes ? `<p><strong>Notes:</strong> ${reservation.notes}</p>` : ''}
+        <p><strong>Statut:</strong> ${escapeHtml(getStatusText(reservation.status))}</p>
+        <p><strong>Source:</strong> ${escapeHtml(reservation.source)}</p>
+        ${reservation.specialRequests ? `<p><strong>Demandes spéciales:</strong> ${escapeHtml(reservation.specialRequests)}</p>` : ''}
+        ${reservation.notes ? `<p><strong>Notes:</strong> ${escapeHtml(reservation.notes)}</p>` : ''}
     `;
     
     // Configurer les boutons
@@ -865,10 +884,10 @@ function displayClients() {
                     
                     return `
                         <tr style="border-bottom: 1px solid #eee;">
-                            <td style="padding: 10px;"><strong>${client.name}</strong></td>
+                            <td style="padding: 10px;"><strong>${escapeHtml(client.name)}</strong></td>
                             <td style="padding: 10px;">
-                                ${client.email ? `📧 ${client.email}<br>` : ''}
-                                ${client.phone ? `📱 ${client.phone}` : ''}
+                                ${client.email ? `📧 ${escapeHtml(client.email)}<br>` : ''}
+                                ${client.phone ? `📱 ${escapeHtml(client.phone)}` : ''}
                             </td>
                             <td style="padding: 10px; text-align: center;"><strong>${client.totalVisits}</strong></td>
                             <td style="padding: 10px; text-align: center;">${client.totalCovers}</td>
@@ -1213,7 +1232,7 @@ function displayStatistics() {
                 <h3 style="color: #147c7f; margin-bottom: 15px;">🏆 Top 5 Clients</h3>
                 ${topClients.map((client, index) => `
                     <div style="display: flex; justify-content: space-between; padding: 10px; background: ${index % 2 ? '#f8f9fa' : 'white'}; border-radius: 5px; margin-bottom: 5px;">
-                        <span><strong>${index + 1}.</strong> ${client.name}</span>
+                        <span><strong>${index + 1}.</strong> ${escapeHtml(client.name)}</span>
                         <span>${client.totalVisits} visites / ${client.totalCovers} couv.</span>
                     </div>
                 `).join('')}

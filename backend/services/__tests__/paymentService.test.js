@@ -5,10 +5,12 @@ const mockStripeClient = {
       expire: jest.fn()
     }
   },
-  refunds: { create: jest.fn() }
+  refunds: { create: jest.fn(), list: jest.fn(), retrieve: jest.fn() }
 };
 
 jest.mock('stripe', () => jest.fn(() => mockStripeClient));
+jest.mock('../../models/Reservation', () => ({ findOneAndUpdate: jest.fn(), findById: jest.fn() }));
+const Reservation = require('../../models/Reservation');
 
 const Stripe = require('stripe');
 const {
@@ -21,7 +23,12 @@ const {
 describe('paymentService idempotence', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockStripeClient.refunds.list.mockResolvedValue({ data: [], has_more: false });
+    Reservation.findOneAndUpdate.mockImplementation(async (_filter, update) => ({
+      deposit: { checkoutAttempt: 2, checkoutParameters: update.$set['deposit.checkoutParameters'] }
+    }));
     process.env.STRIPE_SECRET_KEY = 'sk_test_unit';
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_unit';
     process.env.DEPOSIT_PER_PERSON_CENTS = '1000';
     process.env.DEPOSIT_CURRENCY = 'eur';
     process.env.CHECKOUT_EXPIRY_MINUTES = '30';
@@ -38,6 +45,7 @@ describe('paymentService idempotence', () => {
   });
 
   test('reutilise une cle Checkout stable et ne force pas card', async () => {
+    process.env.DEPOSIT_ACTIVATION_CONFIRMED = 'true';
     mockStripeClient.checkout.sessions.create.mockResolvedValue({
       id: 'cs_test_1',
       url: 'https://checkout.test/1'
@@ -48,7 +56,7 @@ describe('paymentService idempotence', () => {
       date: new Date('2026-09-01T12:00:00Z'),
       time: '12:30',
       email: 'client@example.test',
-      deposit: { amountCents: 6000, checkoutAttempt: 2 }
+      deposit: { amountCents: 6000, checkoutAttempt: 2, expiresAt: new Date(Date.now() + 3600000) }
     };
 
     await createCheckoutSession(reservation);
@@ -67,6 +75,7 @@ describe('paymentService idempotence', () => {
   });
 
   test('reutilise une cle de remboursement stable', async () => {
+    process.env.DEPOSIT_ENABLED = 'false';
     mockStripeClient.refunds.create.mockResolvedValue({ id: 're_1', status: 'succeeded' });
     const reservation = {
       _id: 'reservation-1',
@@ -93,5 +102,33 @@ describe('paymentService idempotence', () => {
       {},
       { idempotencyKey: 'deposit-checkout-expire:reservation-1:cs_1' }
     );
+  });
+
+  test('no new Checkout is created while activation is disabled', async () => {
+    process.env.DEPOSIT_ENABLED = 'false';
+    await expect(createCheckoutSession({})).rejects.toThrow('desactivees');
+    expect(mockStripeClient.checkout.sessions.create).not.toHaveBeenCalled();
+  });
+
+  test('consulte un remboursement connu au lieu de recreer un POST', async () => {
+    mockStripeClient.refunds.retrieve.mockResolvedValue({ id: 're_1', status: 'succeeded' });
+    await refundDeposit({ _id: 'reservation-1', deposit: { stripePaymentIntentId: 'pi_1', stripeRefundId: 're_1' } });
+    expect(mockStripeClient.refunds.retrieve).toHaveBeenCalledWith('re_1');
+    expect(mockStripeClient.refunds.create).not.toHaveBeenCalled();
+  });
+
+  test('retrouve une reponse perdue sans recreer de remboursement', async () => {
+    mockStripeClient.refunds.list.mockResolvedValue({ data: [{ id: 're_1' }], has_more: false });
+    mockStripeClient.refunds.retrieve.mockResolvedValue({ id: 're_1', status: 'pending' });
+    await refundDeposit({ _id: 'reservation-1', deposit: { stripePaymentIntentId: 'pi_1' } });
+    expect(mockStripeClient.refunds.create).not.toHaveBeenCalled();
+    expect(mockStripeClient.refunds.retrieve).toHaveBeenCalledWith('re_1');
+  });
+
+  test('ne relance pas automatiquement plusieurs remboursements existants', async () => {
+    mockStripeClient.refunds.list.mockResolvedValue({ data: [{ id: 're_1' }, { id: 're_2' }], has_more: false });
+    await expect(refundDeposit({ _id: 'reservation-1', deposit: { stripePaymentIntentId: 'pi_1' } }))
+      .rejects.toMatchObject({ code: 'REFUND_REVIEW' });
+    expect(mockStripeClient.refunds.create).not.toHaveBeenCalled();
   });
 });

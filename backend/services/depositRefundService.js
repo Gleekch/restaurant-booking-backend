@@ -1,5 +1,5 @@
 const Reservation = require('../models/Reservation');
-const { refundDeposit } = require('./paymentService');
+const { refundDeposit, retrieveRefund } = require('./paymentService');
 
 const DEFAULT_RECONCILIATION_INTERVAL_MINUTES = 10;
 const DEFAULT_RECONCILIATION_MIN_AGE_MINUTES = 2;
@@ -16,6 +16,7 @@ function refundResult(reservation, overrides = {}) {
     reservation,
     refunded: reservation.deposit && reservation.deposit.status === 'refunded',
     pending: reservation.deposit && reservation.deposit.status === 'refund_pending',
+    needsAttention: Boolean(reservation.deposit && ['refund_failed', 'refund_review'].includes(reservation.deposit.status)),
     alreadyRefunded: false,
     ...overrides
   };
@@ -49,60 +50,94 @@ async function refundReservationSafely(reservationId) {
       return refundResult(reservation, { alreadyRefunded: true });
     }
 
+    if (reservation.deposit && ['refund_failed', 'refund_review'].includes(reservation.deposit.status)) {
+      return refundResult(reservation);
+    }
+
     if (!reservation.deposit || reservation.deposit.status !== 'refund_pending') {
       throw new Error('Aucune arrhe remboursable pour cette reservation');
     }
   }
 
-  const refund = await refundDeposit(reservation);
-  const succeeded = refund.status === 'succeeded';
-  const updated = await Reservation.findOneAndUpdate(
-    { _id: reservationId, 'deposit.status': 'refund_pending' },
-    {
-      $set: {
-        'deposit.stripeRefundId': refund.id,
-        'deposit.status': succeeded ? 'refunded' : 'refund_pending',
-        'deposit.refundedAt': succeeded ? new Date() : null
-      }
-    },
-    { new: true, runValidators: true }
-  );
-
-  if (updated) return refundResult(updated);
-
-  const current = await Reservation.findById(reservationId);
-  if (current && current.deposit && current.deposit.status === 'refunded') {
-    return refundResult(current, { alreadyRefunded: true });
+  try {
+    const refund = await refundDeposit(reservation);
+    const updated = await synchronizeRefund(reservationId, refund.id);
+    if (!updated) throw new Error('Identite du remboursement impossible a confirmer');
+    return refundResult(updated);
+  } catch (error) {
+    if (error.code !== 'REFUND_REVIEW') throw error;
+    const updated = await Reservation.findOneAndUpdate(
+      { _id: reservationId, 'deposit.status': 'refund_pending' },
+      { $set: { 'deposit.status': 'refund_review', 'deposit.refundFailureReason': error.message },
+        $inc: { 'deposit.refundVersion': 1 } },
+      { new: true, runValidators: true }
+    ) || await Reservation.findById(reservationId);
+    return refundResult(updated);
   }
-  throw new Error('Etat du remboursement impossible a confirmer');
+}
+
+function matchesPayment(refund, reservation) {
+  const intentId = typeof refund.payment_intent === 'string'
+    ? refund.payment_intent : refund.payment_intent && refund.payment_intent.id;
+  return Boolean(reservation.deposit && intentId
+    && intentId === reservation.deposit.stripePaymentIntentId
+    && String(refund.currency || '').toLowerCase() === String(reservation.deposit.currency).toLowerCase()
+    && (!refund.metadata || !refund.metadata.reservationId || refund.metadata.reservationId === String(reservation._id)));
+}
+
+async function synchronizeRefund(reservationId, refundId) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const before = await Reservation.findById(reservationId);
+    if (!before || !before.deposit) return null;
+    const deposit = before.deposit;
+    if (deposit.stripeRefundId && deposit.stripeRefundId !== refundId) return null;
+
+    // Events may arrive out of order, and idempotent POST responses are cached.
+    // Always read Stripe's current state, including bank failures after success.
+    const refund = await retrieveRefund(refundId);
+    if (refund.id !== refundId || !matchesPayment(refund, before)) return null;
+    const fullAmount = Number.isInteger(refund.amount) && refund.amount === deposit.amountCents;
+    let status = 'refund_review';
+    let reason = null;
+    if (['failed', 'canceled'].includes(refund.status)) {
+      status = 'refund_failed';
+      reason = refund.failure_reason || refund.status;
+    } else if (!fullAmount) {
+      reason = 'Montant partiel ou incoherent : verification manuelle necessaire';
+    } else if (refund.status === 'succeeded') {
+      status = 'refunded';
+    } else if (refund.status === 'pending') {
+      status = 'refund_pending';
+    } else {
+      reason = 'Action necessaire dans Stripe : ' + refund.status;
+    }
+    const version = Number(deposit.refundVersion) || 0;
+    const updated = await Reservation.findOneAndUpdate(
+      { _id: reservationId, 'deposit.stripePaymentIntentId': deposit.stripePaymentIntentId,
+        'deposit.stripeRefundId': { $in: [null, refundId] },
+        'deposit.refundVersion': version === 0 ? { $in: [null, 0] } : version },
+      { $set: {
+        'deposit.stripeRefundId': refund.id,
+        'deposit.status': status,
+        'deposit.refundStripeStatus': refund.status,
+        'deposit.refundAmountCents': Number.isInteger(refund.amount) ? refund.amount : 0,
+        'deposit.refundFailureReason': reason,
+        'deposit.refundedAt': status === 'refunded' ? (deposit.refundedAt || new Date()) : null
+      }, $inc: { 'deposit.refundVersion': 1 } },
+      { new: true, runValidators: true }
+    );
+    if (updated) return updated;
+    // A concurrent update won: re-read BOTH stores, never persist an old result.
+  }
+  throw new Error('Remboursement modifie simultanement : nouvelle verification necessaire');
 }
 
 async function applyRefundEvent(refund) {
   const reservationId = refund.metadata && refund.metadata.reservationId;
   if (!reservationId || !refund.id) return null;
-
-  const succeeded = refund.status === 'succeeded';
-  const failed = ['failed', 'canceled'].includes(refund.status);
-  const status = succeeded ? 'refunded' : (failed ? 'paid' : 'refund_pending');
-  const allowedStatuses = succeeded
-    ? ['paid', 'refund_pending', 'refunded']
-    : ['paid', 'refund_pending'];
-
-  return Reservation.findOneAndUpdate(
-    {
-      _id: reservationId,
-      'deposit.stripeRefundId': { $in: [null, refund.id] },
-      'deposit.status': { $in: allowedStatuses }
-    },
-    {
-      $set: {
-        'deposit.stripeRefundId': refund.id,
-        'deposit.status': status,
-        'deposit.refundedAt': succeeded ? new Date() : null
-      }
-    },
-    { new: true, runValidators: true }
-  );
+  const reservation = await Reservation.findById(reservationId);
+  if (!reservation || !matchesPayment(refund, reservation)) return null;
+  return synchronizeRefund(reservationId, refund.id);
 }
 
 async function reconcilePendingRefunds(options = {}) {
@@ -144,7 +179,9 @@ async function reconcilePendingRefunds(options = {}) {
   for (const reservation of pendingReservations) {
     try {
       const result = await refundFn(reservation._id);
+      if (options.io && result.reservation) options.io.emit('update-reservation', result.reservation);
       if (result.refunded || result.alreadyRefunded) summary.refunded += 1;
+      else if (result.needsAttention) summary.failed += 1;
       else summary.pending += 1;
     } catch (error) {
       summary.failed += 1;
@@ -155,7 +192,7 @@ async function reconcilePendingRefunds(options = {}) {
   return summary;
 }
 
-function startRefundReconciliationScheduler() {
+function startRefundReconciliationScheduler(io) {
   const intervalMinutes = positiveInteger(
     process.env.REFUND_RECONCILIATION_INTERVAL_MINUTES,
     DEFAULT_RECONCILIATION_INTERVAL_MINUTES,
@@ -167,7 +204,7 @@ function startRefundReconciliationScheduler() {
     if (running) return;
     running = true;
     try {
-      const summary = await reconcilePendingRefunds();
+      const summary = await reconcilePendingRefunds({ io });
       if (!summary.skipped && (summary.scanned > 0 || summary.failed > 0)) {
         console.log('Reconciliation remboursements:', summary);
       }

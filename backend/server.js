@@ -5,7 +5,7 @@ const http = require('http');
 const path = require('path');
 const socketIo = require('socket.io');
 const rateLimit = require('express-rate-limit');
-const { apiKey, basicAuth } = require('./middleware/auth');
+const { apiKey, basicAuth, socketAuth } = require('./middleware/auth');
 require('dotenv').config();
 const { startReminderScheduler } = require('./services/reminderService');
 const { startRefundReconciliationScheduler } = require('./services/depositRefundService');
@@ -67,6 +67,7 @@ app.get('/api/health', (req, res) => {
       : 'local'
   });
 });
+io.use(socketAuth);
 
 // Rate limiting — anti-spam sur la création de réservations publiques
 const reservationLimiter = rateLimit({
@@ -78,8 +79,10 @@ const reservationLimiter = rateLimit({
 // Protection admin avec Basic Auth
 // Injecter l'API key dans la page pour que les fetch() passent
 app.get('/admin/config.js', basicAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.type('application/javascript');
-  res.send(`window.__API_KEY = "${process.env.API_KEY || ''}";`);
+  // Same-origin admin requests already carry Basic Auth; do not expose the API key.
+  res.send('window.__API_KEY = "";');
 });
 app.use('/admin', basicAuth, express.static(path.join(__dirname, 'public', 'admin')));
 
@@ -90,9 +93,10 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/restauran
 }).then(async () => {
   console.log('Connected to MongoDB');
   await Reservation.createIndexes();
+  await require('./models/BookingDay').init();
   console.log('Index anti-doublon Reservation verifies');
   startReminderScheduler(io);
-  startRefundReconciliationScheduler();
+  startRefundReconciliationScheduler(io);
 }).catch(err => {
   console.error('Initialisation MongoDB impossible:', err);
   process.exit(1);
@@ -131,6 +135,6 @@ io.on('connection', (socket) => {
 app.set('io', io);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
 });
