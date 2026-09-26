@@ -203,6 +203,16 @@ body {
     animation: pulse 1.5s infinite;
 }
 
+.reconnect-button {
+    padding: 4px 6px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    background: var(--bg);
+    font: inherit;
+    cursor: pointer;
+}
+
 .status-dot.connected {
     background: var(--success);
     animation: none;
@@ -1030,6 +1040,13 @@ main {
 
 /* ─── Responsive — écran étroit (mobile) ─── */
 @media (max-width: 600px) {
+    .app-bar {
+        height: auto;
+        min-height: 48px;
+        flex-wrap: wrap;
+        gap: 6px 12px;
+        padding: 10px 12px;
+    }
     .rail {
         width: 52px;
     }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#1c1917">
     <title>Au Murmure des Flots - Gestion</title>
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="manifest.json" crossorigin="use-credentials">
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -45,6 +45,7 @@
                 <div class="connection-status" id="connection-status">
                     <span class="status-dot"></span>
                     <span class="status-text">Connexion...</span>
+                    <button type="button" id="reconnect-button" class="reconnect-button" hidden>Recharger</button>
                 </div>
             </div>
 

@@ -30,6 +30,30 @@ test('desktop API headers authenticate HTTP and realtime', () => {
   expect(next.mock.calls).toEqual([[], []]);
 });
 
+test('private API challenges use the admin realm so browser credentials can be reused', () => {
+  process.env.ADMIN_USER = 'unit';
+  process.env.ADMIN_PASS = 'unit-only';
+  const adminResponse = response();
+  const apiResponse = response();
+  const next = jest.fn();
+  basicAuth({ headers: {} }, adminResponse, next);
+  apiKey({ headers: {} }, apiResponse, next);
+  expect(next).not.toHaveBeenCalled();
+  expect(apiResponse.status).toHaveBeenCalledWith(401);
+  expect(apiResponse.setHeader).toHaveBeenCalledWith('WWW-Authenticate', 'Basic realm="Au Murmure des Flots - Admin"');
+  expect(adminResponse.setHeader).toHaveBeenCalledWith('WWW-Authenticate', 'Basic realm="Au Murmure des Flots - Admin"');
+  expect(apiResponse.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+});
+
+test('a rejected Basic credential is never authorized by adding a challenge', () => {
+  process.env.ADMIN_USER = 'unit';
+  process.env.ADMIN_PASS = 'unit-only';
+  const next = jest.fn(), res = response();
+  apiKey({ headers: { authorization: 'Basic ' + Buffer.from('unit:wrong').toString('base64') } }, res, next);
+  expect(next).not.toHaveBeenCalled();
+  expect(res.status).toHaveBeenCalledWith(401);
+});
+
 test('wrong or missing realtime credentials are rejected', () => {
   process.env.API_KEY = 'unit-only-operator-key';
   for (const headers of [{}, { 'x-api-key': 'wrong' }]) {

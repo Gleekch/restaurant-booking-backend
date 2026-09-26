@@ -76,13 +76,13 @@ function renderWaveBreakdown(waveSummary, labels) {
     `;
 }
 
-// Fetch wrapper qui envoie l'API key (injectée par config.js)
+// Basic Auth is kept by the browser, never copied into JS or localStorage.
 function apiFetch(url, options = {}) {
     const headers = options.headers || {};
     if (window.__API_KEY) {
         headers['X-API-Key'] = window.__API_KEY;
     }
-    return fetch(url, { ...options, headers });
+    return fetch(url, { credentials: 'same-origin', cache: 'no-store', ...options, headers });
 }
 
 // DOM Elements
@@ -95,6 +95,7 @@ const pendingBadge = document.getElementById('pending-badge');
 document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
     initNewReservationForm();
+    document.getElementById('reconnect-button')?.addEventListener('click', () => window.location.reload());
     loadReservations();
 
     // Refresh every 30 seconds
@@ -125,6 +126,10 @@ function initNavigation() {
 async function loadReservations() {
     try {
         const response = await apiFetch(`${API_URL}/api/reservations`);
+        if (response.status === 401) {
+            updateConnectionStatus(false, true);
+            return;
+        }
         if (!response.ok) throw new Error('Erreur réseau');
 
         const data = await response.json();
@@ -146,16 +151,18 @@ async function loadReservations() {
 }
 
 // Update Connection Status
-function updateConnectionStatus(connected) {
+function updateConnectionStatus(connected, authenticationRequired = false) {
     const dot = connectionStatus.querySelector('.status-dot');
     const text = connectionStatus.querySelector('.status-text');
+    const reconnectButton = document.getElementById('reconnect-button');
+    if (reconnectButton) reconnectButton.hidden = connected;
 
     if (connected) {
         dot.className = 'status-dot connected';
         text.textContent = 'Connecté';
     } else {
         dot.className = 'status-dot disconnected';
-        text.textContent = 'Hors ligne';
+        text.textContent = authenticationRequired ? 'Connexion requise' : 'Hors ligne';
     }
 }
 
@@ -1006,9 +1013,17 @@ async function confirmAllPending() {
 }
 
 // New Reservation Form
+function getRestaurantDateISO(now = new Date()) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Indian/Reunion', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(now);
+    const value = type => parts.find(part => part.type === type).value;
+    return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
 function initNewReservationForm() {
-    // Set default date to today
-    document.getElementById('date').valueAsDate = new Date();
+    // valueAsDate can throw when a browser falls back to a text input.
+    document.getElementById('date').value = getRestaurantDateISO();
 
     document.getElementById('new-reservation-form').addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -1037,7 +1052,7 @@ function initNewReservationForm() {
             showToast('Réservation créée', 'success');
             closeNewModal();
             document.getElementById('new-reservation-form').reset();
-            document.getElementById('date').valueAsDate = new Date();
+            document.getElementById('date').value = getRestaurantDateISO();
             loadReservations();
         } catch (error) {
             showToast('Erreur lors de la création', 'error');

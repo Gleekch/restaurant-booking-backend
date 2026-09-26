@@ -2,10 +2,9 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const http = require('http');
-const path = require('path');
 const socketIo = require('socket.io');
 const rateLimit = require('express-rate-limit');
-const { apiKey, basicAuth, socketAuth } = require('./middleware/auth');
+const { apiKey, socketAuth } = require('./middleware/auth');
 require('dotenv').config();
 const { startReminderScheduler } = require('./services/reminderService');
 const { startRefundReconciliationScheduler } = require('./services/depositRefundService');
@@ -76,15 +75,7 @@ const reservationLimiter = rateLimit({
   message: { success: false, message: 'Trop de requêtes, réessayez dans 15 minutes' }
 });
 
-// Protection admin avec Basic Auth
-// Injecter l'API key dans la page pour que les fetch() passent
-app.get('/admin/config.js', basicAuth, (req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.type('application/javascript');
-  // Same-origin admin requests already carry Basic Auth; do not expose the API key.
-  res.send('window.__API_KEY = "";');
-});
-app.use('/admin', basicAuth, express.static(path.join(__dirname, 'public', 'admin')));
+app.use('/admin', require('./routes/admin'));
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/restaurant_booking', {
