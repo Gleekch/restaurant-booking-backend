@@ -492,41 +492,29 @@ function displayReservations() {
 // Créer une carte de réservation
 function createReservationCard(reservation) {
     const card = document.createElement('div');
-    card.className = 'reservation-card';
+    card.className = 'reservation-card status-' + reservation.status;
+    card.tabIndex = 0;
+    card.setAttribute('role', 'button');
+    card.setAttribute('aria-label', 'Voir la réservation de ' + reservation.customerName + ' à ' + reservation.time);
     card.innerHTML = `
         <div class="reservation-header">
             <div class="reservation-time">${escapeHtml(reservation.time)}</div>
             <span class="reservation-status status-${escapeHtml(reservation.status)}">${escapeHtml(getStatusText(reservation.status))}</span>
         </div>
-        <div class="reservation-info">
-            <div class="info-row">
-                <span class="info-label">Nom:</span>
-                <strong>${escapeHtml(reservation.customerName)}</strong>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Téléphone:</span>
-                ${escapeHtml(reservation.phoneNumber)}
-            </div>
-            <div class="info-row">
-                <span class="info-label">Personnes:</span>
-                ${escapeHtml(reservation.numberOfPeople)}
-            </div>
-            ${getDepositText(reservation) ? `
-            <div class="info-row">
-                <span class="info-label">Arrhes:</span>
-                ${getDepositText(reservation)}
-            </div>
-            ` : ''}
-            ${reservation.specialRequests ? `
-            <div class="info-row">
-                <span class="info-label">Notes:</span>
-                ${escapeHtml(reservation.specialRequests)}
-            </div>
-            ` : ''}
+        <div class="card-name">${escapeHtml(reservation.customerName)}</div>
+        <div class="guest-line"><span><strong>${escapeHtml(reservation.numberOfPeople)}</strong> couverts</span><span>${reservation.table ? 'Table ' + escapeHtml(reservation.table) : 'Table à attribuer'}</span></div>
+        <div class="guest-phone">${escapeHtml(reservation.phoneNumber)}</div>
+        <div class="card-deposit">
+            ${getDepositText(reservation) ? `<span class="deposit-badge ${escapeHtml(reservation.deposit.status)}">Arrhes ${getDepositText(reservation)}</span>` : ''}
+            ${reservation.depositException ? '<span class="deposit-badge exception">Exception sans arrhes</span>' : ''}
+            ${reservation.arrivedAt ? '<span class="presence-badge">Client installé</span>' : ''}
         </div>
+        ${reservation.specialRequests ? `<div class="card-notes"><strong>Attention particulière</strong>${escapeHtml(reservation.specialRequests)}</div>` : ''}
     `;
-
     card.addEventListener('click', () => showReservationDetails(reservation));
+    card.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); card.click(); }
+    });
     return card;
 }
 
@@ -549,14 +537,14 @@ function getDepositText(reservation) {
     if (!d || !d.required) return '';
     const amount = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((d.amountCents || 0) / 100);
     const labels = {
-        awaiting: '⏳ non payées',
-        paid: `💶 ${amount} payées`,
-        refund_pending: '⏳ remboursement en cours',
+        awaiting: 'non payées',
+        paid: `${amount} payées`,
+        refund_pending: 'remboursement en cours',
         refund_failed: 'Remboursement echoue - verification necessaire',
         refund_review: 'Remboursement a verifier dans Stripe',
-        deducted: `✓ déduites (${amount})`,
-        refunded: '↩ remboursées',
-        failed: '⚠ non abouti'
+        deducted: `déduites (${amount})`,
+        refunded: 'remboursées',
+        failed: 'non abouti'
     };
     return labels[d.status] || '';
 }
@@ -566,19 +554,25 @@ function showReservationDetails(reservation) {
     modal.dataset.reservationId = reservation._id;
     const details = document.getElementById('reservation-details');
     details.innerHTML = `
-        <p><strong>Client:</strong> ${escapeHtml(reservation.customerName)}</p>
-        <p><strong>Téléphone:</strong> ${escapeHtml(reservation.phoneNumber)}</p>
-        <p><strong>Email:</strong> ${escapeHtml(reservation.email || 'Non renseigné')}</p>
-        <p><strong>Date:</strong> ${new Date(reservation.date).toLocaleDateString('fr-FR')}</p>
-        <p><strong>Heure:</strong> ${escapeHtml(reservation.time)}</p>
-        <p><strong>Nombre de personnes:</strong> ${escapeHtml(reservation.numberOfPeople)}</p>
-        ${getDepositText(reservation) ? `<p><strong>Arrhes:</strong> ${getDepositText(reservation)}</p>` : ''}
-        <p><strong>Statut:</strong> ${escapeHtml(getStatusText(reservation.status))}</p>
-        <p><strong>Source:</strong> ${escapeHtml(reservation.source)}</p>
-        ${reservation.specialRequests ? `<p><strong>Demandes spéciales:</strong> ${escapeHtml(reservation.specialRequests)}</p>` : ''}
-        ${reservation.notes ? `<p><strong>Notes:</strong> ${escapeHtml(reservation.notes)}</p>` : ''}
+        <div class="guest-identity"><p class="eyebrow">Votre hôte</p><h3>${escapeHtml(reservation.customerName)}</h3>
+            <span class="reservation-status status-${escapeHtml(reservation.status)}">${escapeHtml(getStatusText(reservation.status))}</span>
+            ${reservation.arrivedAt ? '<span class="presence-badge">Client installé</span>' : ''}
+        </div>
+        <div class="detail-grid">
+            <div class="detail-field"><span>Date</span>${new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
+            <div class="detail-field"><span>Heure</span>${escapeHtml(reservation.time)}</div>
+            <div class="detail-field"><span>Couverts</span>${escapeHtml(reservation.numberOfPeople)} personnes</div>
+            <div class="detail-field"><span>Table</span>${escapeHtml(reservation.table || 'À attribuer')}</div>
+            <div class="detail-field"><span>Téléphone</span>${escapeHtml(reservation.phoneNumber)}</div>
+            <div class="detail-field"><span>Email</span>${escapeHtml(reservation.email || 'Non renseigné')}</div>
+        </div>
+        ${getDepositText(reservation) ? `<div class="finance-summary"><span>Arrhes · suivi du paiement</span>${getDepositText(reservation)}</div>` : ''}
+        ${window.ServiceRelease.financePanel(false)}
+        <p><strong>Source :</strong> ${escapeHtml(reservation.source)}</p>
+        ${reservation.specialRequests ? `<div class="guest-note"><strong>Demandes spéciales</strong>${escapeHtml(reservation.specialRequests)}</div>` : ''}
+        ${reservation.notes ? `<div class="guest-note"><strong>Notes de service</strong>${escapeHtml(reservation.notes)}</div>` : ''}
     `;
-    
+
     // Configurer les boutons
     const confirmBtn = document.getElementById('confirm-btn');
     const cancelBtn = document.getElementById('cancel-btn');
@@ -610,7 +604,7 @@ function showReservationDetails(reservation) {
     const canRequestDeposit = reservation.email
         && ['pending', 'confirmed'].includes(reservation.status)
         && (!reservation.deposit || reservation.deposit.status === 'none' || reservation.deposit.status === 'failed');
-    newDepositBtn.style.display = canRequestDeposit ? 'inline-flex' : 'none';
+    newDepositBtn.style.display = 'inline-flex';
     if (canRequestDeposit) {
         newDepositBtn.onclick = () => requestDepositDesktop(reservation._id);
     }
@@ -635,6 +629,7 @@ function showReservationDetails(reservation) {
 
 // Marquer l'issue d'une réservation : 'complete' (client arrivé) ou 'no-show'
 async function markReservationOutcome(id, kind) {
+    if (kind === 'complete' && !window.ServiceRelease.financeEnabled) return window.ServiceRelease.explain();
     const label = kind === 'complete' ? 'arrivé' : 'en no-show';
     if (!confirm(`Marquer ce client comme ${label} ?`)) return;
     try {
@@ -653,6 +648,7 @@ async function markReservationOutcome(id, kind) {
 
 // Demander les arrhes depuis le desktop
 async function requestDepositDesktop(id) {
+    if (!window.ServiceRelease.financeEnabled) return window.ServiceRelease.explain();
     if (!confirm('Envoyer un lien de paiement des arrhes par email au client ?')) return;
     try {
         const data = await api.apiRequest(`/api/reservations/${id}/deposit/request`, { method: 'POST' });
@@ -859,7 +855,7 @@ function displayClients() {
     
     clientsContainer.innerHTML = `
         <div style="background: #f8f9fa; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
-            <h3>📊 Statistiques Clients</h3>
+            <h3>Statistiques Clients</h3>
             <p>Total clients uniques: <strong>${clients.length}</strong></p>
             <p>Clients fidèles (3+ visites): <strong>${clients.filter(c => c.totalVisits >= 3).length}</strong></p>
         </div>
@@ -955,8 +951,7 @@ function displayWeekView() {
     }
 
     weekContainer.innerHTML = `
-        <h2 style="margin-bottom: 20px;">📆 Planning de la Semaine</h2>
-        <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px;">
+        <div class="week-grid">
             ${weekDays.map(day => {
                 const dateValue = formatDateInput(day);
                 const midiSummary = getServiceSummary(getServiceReservations(dateValue, 'midi'));
@@ -964,17 +959,17 @@ function displayWeekView() {
                 const isToday = getDayKey(day) === getDayKey(new Date());
 
                 return `
-                    <div style="background: ${isToday ? '#e3f2fd' : 'white'}; border-radius: 10px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-                        <h3 class="service-clickable" data-open-day="${dateValue}" style="text-align: center; color: #147c7f; margin-bottom: 10px;">
+                    <div class="day-card ${isToday ? 'today' : ''}">
+                        <h3 class="service-clickable" data-open-day="${dateValue}" >
                             ${day.toLocaleDateString('fr-FR', { weekday: 'short' })}<br>
                             <small>${day.getDate()}/${day.getMonth() + 1}</small>
                         </h3>
-                        <div class="service-clickable" data-date="${dateValue}" data-service="midi" style="margin-bottom: 10px; padding: 10px; background: #fff3cd; border-radius: 5px;">
-                            <strong>☀️ Midi</strong><br>
+                        <div class="day-service midi service-clickable" data-date="${dateValue}" data-service="midi">
+                            ${renderOnlineClosure(dateValue, 'midi')}<strong>Midi</strong><br>
                             ${midiSummary.totalReservations} rés. / ${midiSummary.totalCovers} couv.
                         </div>
-                        <div class="service-clickable" data-date="${dateValue}" data-service="soir" style="padding: 10px; background: #d1ecf1; border-radius: 5px;">
-                            <strong>🌙 Soir</strong><br>
+                        <div class="day-service soir service-clickable" data-date="${dateValue}" data-service="soir">
+                            ${renderOnlineClosure(dateValue, 'soir')}<strong>Soir</strong><br>
                             ${soirSummary.totalReservations} rés. / ${soirSummary.totalCovers} couv.
                         </div>
                     </div>
@@ -996,7 +991,7 @@ function displayWeekView() {
         });
     });
 
-    document.getElementById('reservations-title').textContent = '📆 Planning de la Semaine';
+    document.getElementById('reservations-title').textContent = 'Planning de la semaine';
 }
 
 function displayMonthView() {
@@ -1043,12 +1038,12 @@ function displayMonthView() {
                             <small>${day.toLocaleDateString('fr-FR', { weekday: 'short' })}</small>
                         </div>
                         <div class="month-service-block midi" data-date="${dateValue}" data-service="midi">
-                            <span class="month-service-name">☀️ Midi</span>
-                            <span class="month-service-value">${midiSummary.totalReservations} rés / ${midiSummary.totalCovers} couv</span>
+                            <span class="month-service-name">Midi</span>
+                            <span class="month-service-value">${renderOnlineClosure(dateValue, 'midi') && !midiSummary.totalReservations && !midiSummary.cancelledCount ? 'Fermé en ligne' : `${renderOnlineClosure(dateValue, 'midi')}${midiSummary.totalReservations} rés / ${midiSummary.totalCovers} couv`}</span>
                         </div>
                         <div class="month-service-block soir" data-date="${dateValue}" data-service="soir">
-                            <span class="month-service-name">🌙 Soir</span>
-                            <span class="month-service-value">${soirSummary.totalReservations} rés / ${soirSummary.totalCovers} couv</span>
+                            <span class="month-service-name">Soir</span>
+                            <span class="month-service-value">${renderOnlineClosure(dateValue, 'soir') && !soirSummary.totalReservations && !soirSummary.cancelledCount ? 'Fermé en ligne' : `${renderOnlineClosure(dateValue, 'soir')}${soirSummary.totalReservations} rés / ${soirSummary.totalCovers} couv`}</span>
                         </div>
                     </div>
                 `;
@@ -1080,7 +1075,7 @@ function displayMonthView() {
         });
     });
 
-    document.getElementById('reservations-title').textContent = '🗓️ Planning du Mois';
+    document.getElementById('reservations-title').textContent = 'Planning du mois';
 }
 
 function openServiceDetail(dateValue, service, returnView = 'week') {
@@ -1114,6 +1109,7 @@ function displayServiceDetail() {
             <button type="button" class="btn back-button" id="back-to-planning">← Retour au planning</button>
         </div>
         <div class="service-detail-banner">
+            ${renderOnlineClosure(serviceDetailState.dateValue, serviceDetailState.service)}
             <h3>${serviceDetailState.service === 'midi' ? '☀️' : '🌙'} ${serviceLabel} - ${formatLongDate(serviceDetailState.dateValue)}</h3>
             <p>${summary.totalCovers} couverts / ${summary.totalReservations} réservations</p>
             ${summary.cancelledCount > 0 ? `<small>${summary.cancelledCount} réservation(s) annulée(s) visible(s), non comptée(s).</small>` : ''}
@@ -1183,7 +1179,7 @@ function displayStatistics() {
     const topClients = clients.slice(0, 5);
     
     statsContainer.innerHTML = `
-        <h2 style="margin-bottom: 20px;">📊 Statistiques du Restaurant</h2>
+        <h2 style="margin-bottom: 20px;">Statistiques du Restaurant</h2>
         
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px;">
             <div style="background: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
@@ -1199,7 +1195,7 @@ function displayStatistics() {
                 <p style="font-size: 36px; font-weight: bold; margin: 10px 0;">${stats.avgCovers}</p>
             </div>
             <div style="background: white; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
-                <h3 style="color: #147c7f;">✅ Taux Confirmation</h3>
+                <h3 style="color: #147c7f;">Taux Confirmation</h3>
                 <p style="font-size: 36px; font-weight: bold; margin: 10px 0;">${stats.confirmedRate}%</p>
             </div>
         </div>
@@ -1240,7 +1236,7 @@ function displayStatistics() {
         </div>
     `;
     
-    document.getElementById('reservations-title').textContent = '📊 Statistiques';
+    document.getElementById('reservations-title').textContent = 'Statistiques';
 }
 
 function renderOperationalDayView() {
@@ -1281,46 +1277,46 @@ function renderOperationalDayView() {
     reservationsContainer.style.display = 'block';
     if (filters) filters.style.display = 'flex';
     reservationsTitle.textContent = getDayKey(selectedDate) === getDayKey(new Date())
-        ? "Réservations d'aujourd'hui"
-        : `Réservations du ${formatLongDate(selectedDate)}`;
+        ? "Le service d'aujourd'hui"
+        : `Le service du ${formatLongDate(selectedDate)}`;
 
     reservationsContainer.innerHTML = `
         <div class="service-summary-grid">
             ${showMidi ? `
                 <div class="service-summary-card midi service-clickable" data-date="${selectedDate}" data-service="midi">
-                    <h3>☀️ Service du Midi (12h00 - ${midiEndStr})</h3>
-                    <p style="font-size: 24px; font-weight: bold;">${midiSummary.totalCovers}/${ONLINE_CAPACITY_LIMIT} couverts</p>
-                    <p>${midiSummary.totalReservations} réservations</p>
+                    <div class="service-overline"><h3>Midi</h3><span class="service-hours">12h00 &ndash; ${midiEndStr}</span></div>
+                    ${renderOnlineClosure(selectedDate, 'midi')}
+                    <div class="service-totals"><strong>${midiSummary.totalCovers}</strong><span>/ ${ONLINE_CAPACITY_LIMIT} couverts</span><span class="service-reservations">${midiSummary.totalReservations} réservations</span></div>
                     ${midiSummary.cancelledCount > 0 ? `<p>${midiSummary.cancelledCount} annulée(s) non comptée(s)</p>` : ''}
                     <div class="progress-track">
                         <div class="progress-fill ${getLoadClass(midiSummary.totalCovers)}" style="width: ${Math.min((midiSummary.totalCovers / ONLINE_CAPACITY_LIMIT) * 100, 100)}%;"></div>
                     </div>
                     ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
                     <div class="wave-recommended" id="wave-recommended-midi"></div>
-                    <div style="text-align:right; margin-top:8px;">
-                        <button class="btn-block-service" data-date="${selectedDate}" data-service="midi" style="font-size:11px; padding:4px 10px; border:1px solid #dc2626; background:transparent; color:#dc2626; border-radius:4px; cursor:pointer;">🔒 Marquer complet</button>
+                    <div class="service-controls"><span>Gestion du service</span>
+                        <button class="btn-block-service" data-date="${selectedDate}" data-service="midi" style="font-size:11px; padding:4px 10px; border:1px solid #dc2626; background:transparent; color:#dc2626; border-radius:4px; cursor:pointer;">Marquer complet</button>
                     </div>
                 </div>
             ` : ''}
             ${showSoir ? `
                 <div class="service-summary-card soir service-clickable" data-date="${selectedDate}" data-service="soir">
-                    <h3>🌙 Service du Soir (18h00 - ${soirEndStr})</h3>
-                    <p style="font-size: 24px; font-weight: bold;">${soirSummary.totalCovers}/${ONLINE_CAPACITY_LIMIT} couverts</p>
-                    <p>${soirSummary.totalReservations} réservations</p>
+                    <div class="service-overline"><h3>Soir</h3><span class="service-hours">18h00 &ndash; ${soirEndStr}</span></div>
+                    ${renderOnlineClosure(selectedDate, 'soir')}
+                    <div class="service-totals"><strong>${soirSummary.totalCovers}</strong><span>/ ${ONLINE_CAPACITY_LIMIT} couverts</span><span class="service-reservations">${soirSummary.totalReservations} réservations</span></div>
                     ${soirSummary.cancelledCount > 0 ? `<p>${soirSummary.cancelledCount} annulée(s) non comptée(s)</p>` : ''}
                     <div class="progress-track">
                         <div class="progress-fill ${getLoadClass(soirSummary.totalCovers)}" style="width: ${Math.min((soirSummary.totalCovers / ONLINE_CAPACITY_LIMIT) * 100, 100)}%;"></div>
                     </div>
                     ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
                     <div class="wave-recommended" id="wave-recommended-soir"></div>
-                    <div style="text-align:right; margin-top:8px;">
-                        <button class="btn-block-service" data-date="${selectedDate}" data-service="soir" style="font-size:11px; padding:4px 10px; border:1px solid #dc2626; background:transparent; color:#dc2626; border-radius:4px; cursor:pointer;">🔒 Marquer complet</button>
+                    <div class="service-controls"><span>Gestion du service</span>
+                        <button class="btn-block-service" data-date="${selectedDate}" data-service="soir" style="font-size:11px; padding:4px 10px; border:1px solid #dc2626; background:transparent; color:#dc2626; border-radius:4px; cursor:pointer;">Marquer complet</button>
                     </div>
                 </div>
             ` : ''}
         </div>
-        ${showMidi ? `<h3 style="margin-bottom: 10px;">☀️ Midi - ${midiSummary.totalReservations} réservations</h3><div class="reservations-subgrid" id="today-midi-grid"></div>` : ''}
-        ${showSoir ? `<h3 style="margin-bottom: 10px;">🌙 Soir - ${soirSummary.totalReservations} réservations</h3><div class="reservations-subgrid" id="today-soir-grid"></div>` : ''}
+        ${showMidi ? `<div class="service-list-heading"><h3>Midi</h3><span>${midiSummary.totalReservations} réservations</span></div><div class="reservations-subgrid" id="today-midi-grid"></div>` : ''}
+        ${showSoir ? `<div class="service-list-heading"><h3>Soir</h3><span>${soirSummary.totalReservations} réservations</span></div><div class="reservations-subgrid" id="today-soir-grid"></div>` : ''}
     `;
 
     updateRecommendedHours(selectedDate);
@@ -1374,7 +1370,7 @@ function displayPending() {
     const filters = document.querySelector('.filters');
     if (filters) filters.style.display = 'none';
     pendingSection.style.display = 'block';
-    reservationsTitle.textContent = '⏳ Réservations à confirmer';
+    reservationsTitle.textContent = 'À confirmer';
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1415,7 +1411,7 @@ function displayPending() {
 
     byDate.forEach((dateReservations, dateKey) => {
         const dateLabel = document.createElement('h3');
-        dateLabel.style.cssText = 'margin: 20px 0 10px 0; padding: 10px; background: #fff3cd; border-radius: 5px; color: #856404;';
+        dateLabel.className = 'pending-date-heading';
         dateLabel.textContent = formatLongDate(dateReservations[0].date) +
             ` — ${dateReservations.length} rés. / ${dateReservations.reduce((s, r) => s + r.numberOfPeople, 0)} couv.`;
         pendingContainer.appendChild(dateLabel);
@@ -1591,3 +1587,10 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('Chargement des réservations au démarrage...');
     loadReservations();
 });
+
+
+function renderOnlineClosure(dateISO, service) {
+    const day = new Date(String(dateISO).slice(0, 10) + 'T12:00:00Z').getUTCDay();
+    return day === 1 || day === 2 || (day === 0 && service === 'soir')
+        ? '<span class="closure-badge">Fermé en ligne</span>' : '';
+}

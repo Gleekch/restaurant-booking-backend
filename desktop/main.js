@@ -1,12 +1,9 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, safeStorage, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const util = require('util');
-const dotenv = require('dotenv');
+const { pathToFileURL } = require('url');
 const io = require('socket.io-client');
-
-const DEFAULT_BACKEND_URL = 'https://restaurant-booking-backend-y3sp.onrender.com';
-const DESKTOP_ENV_KEYS = new Set(['BACKEND_URL', 'API_KEY']);
+const { createConnectionStore } = require('./connection-store');
 
 // En mode packagé (exe), stdout/stderr causent EPIPE sur Windows.
 // __dirname contient 'app.asar' uniquement quand l'app est packagée.
@@ -17,57 +14,12 @@ process.on('uncaughtException', (error) => {
   throw error;
 });
 
-function getCandidateEnvPaths() {
-  const candidates = [
-    process.env.RESTAURANT_ENV_PATH,
-    path.resolve(process.cwd(), '.env.desktop'),
-    path.resolve(process.cwd(), '.env'),
-    path.resolve(__dirname, '..', '.env.desktop'),
-    path.resolve(__dirname, '..', '.env')
-  ].filter(Boolean);
-
-  if (process.resourcesPath) {
-    candidates.push(path.join(process.resourcesPath, '.env.desktop'));
-    candidates.push(path.join(process.resourcesPath, '.env'));
-  }
-
-  if (process.execPath) {
-    candidates.push(path.join(path.dirname(process.execPath), '.env.desktop'));
-    candidates.push(path.join(path.dirname(process.execPath), '.env'));
-  }
-
-  return [...new Set(candidates)];
-}
-
-function loadEnvironmentConfig() {
-  for (const envPath of getCandidateEnvPaths()) {
-    if (!fs.existsSync(envPath)) {
-      continue;
-    }
-
-    try {
-      const parsed = dotenv.parse(fs.readFileSync(envPath));
-      for (const key of DESKTOP_ENV_KEYS) {
-        if (Object.prototype.hasOwnProperty.call(parsed, key) && typeof process.env[key] === 'undefined') {
-          process.env[key] = parsed[key];
-        }
-      }
-      return envPath;
-    } catch (error) {
-      safeError('Configuration desktop illisible:', error.message);
-    }
-  }
-
-  return null;
-}
-
-const loadedEnvPath = loadEnvironmentConfig();
-
 // Dans l'exe portable, stdout/stderr n'ont pas de console → EPIPE inévitable.
 // On neutralise complètement toutes les sorties console.
 
-const BACKEND_URL = (process.env.BACKEND_URL || DEFAULT_BACKEND_URL).replace(/\/$/, '');
-const API_KEY = process.env.API_KEY || '';
+let connection;
+let setupMessage = '';
+let connectionPageLoading = false;
 
 let mainWindow;
 let tray;
@@ -79,31 +31,28 @@ function safeError() {
 
 }
 
-if (loadedEnvPath) {
-  safeLog('Configuration chargee depuis:', loadedEnvPath);
-} else {
-  safeWarn('Aucun fichier .env trouve, utilisation des variables deja presentes.');
-}
-
-safeLog('Backend cible:', BACKEND_URL);
-
 function safeWarn() {}
 
 function buildAuthHeaders() {
-  const key = process.env.API_KEY || API_KEY;
-  if (key) {
-    return { 'X-API-Key': key };
-  }
-
-  return {};
+  return connection.headers();
 }
 
 async function apiRequest(endpoint, options = {}) {
+  if (connection.snapshot().requiresSetup) throw new Error('Connexion requise sur ce poste');
+  const backendUrl = connection.snapshot().backendUrl;
+  if (typeof endpoint !== 'string' || !endpoint.startsWith('/api/')) throw new Error('Route non autorisee');
+  const target = new URL(endpoint, backendUrl);
+  if (target.origin !== backendUrl || !target.pathname.startsWith('/api/')) throw new Error('Route non autorisee');
+  if (/^\/api\/reservations\/[^/]+\/(?:complete|close|deposit\/(?:request|refund|deducted|exemption))\/?$/.test(target.pathname)) {
+    throw new Error('Fonction indisponible dans cette version');
+  }
   const headers = buildAuthHeaders();
 
   const requestOptions = {
     method: options.method || 'GET',
-    headers
+    headers,
+    redirect: 'error',
+    signal: AbortSignal.timeout(20000)
   };
 
   if (options.body) {
@@ -111,7 +60,12 @@ async function apiRequest(endpoint, options = {}) {
     requestOptions.body = JSON.stringify(options.body);
   }
 
-  const response = await fetch(`${BACKEND_URL}${endpoint}`, requestOptions);
+  const response = await fetch(target, requestOptions);
+  if (response.status === 401) {
+    connection.reject();
+    showConnection('Identifiants refuses par le serveur. Veuillez vous reconnecter.');
+    throw new Error('Connexion requise sur ce poste');
+  }
   const isJson = response.headers.get('content-type')?.includes('application/json');
   const payload = isJson ? await response.json() : await response.text();
 
@@ -140,12 +94,14 @@ function connectToBackend() {
     socket = null;
   }
 
+  if (connection.snapshot().requiresSetup) return;
+
   const authHeaders = buildAuthHeaders();
   const socketOptions = Object.keys(authHeaders).length > 0
     ? { extraHeaders: authHeaders }
     : undefined;
 
-  socket = io(BACKEND_URL, socketOptions);
+  socket = io(connection.snapshot().backendUrl, socketOptions);
 
   socket.on('connect', () => {
     safeLog('Connecte au serveur backend');
@@ -164,6 +120,10 @@ function connectToBackend() {
   socket.on('connect_error', (error) => {
     safeError('Connexion Socket.IO impossible:', error.message);
     sendToRenderer('backend-disconnected');
+    if (error.message === 'Authentification requise') {
+      connection.reject();
+      showConnection('Identifiants refuses par le serveur. Veuillez vous reconnecter.');
+    }
   });
 
   socket.on('new-reservation', (reservation) => {
@@ -184,6 +144,40 @@ function connectToBackend() {
   });
 }
 
+function disconnectSocket() {
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+    socket = null;
+  }
+}
+
+function showConnection(message = '', forceReload = false) {
+  setupMessage = message;
+  disconnectSocket();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const file = path.join(__dirname, 'connection.html');
+    if (!forceReload && (connectionPageLoading || mainWindow.webContents.getURL() === pathToFileURL(file).href)) return;
+    connectionPageLoading = true;
+    mainWindow.loadFile(file)
+      .catch(() => safeError('Impossible d ouvrir la connexion'))
+      .finally(() => { connectionPageLoading = false; });
+  }
+}
+
+function showReservations() {
+  if (connection.snapshot().requiresSetup) return;
+  setupMessage = '';
+  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  connectToBackend();
+}
+
+function trustedConnectionSender(event) {
+  return mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents
+    && event.senderFrame === mainWindow.webContents.mainFrame
+    && event.senderFrame.url === pathToFileURL(path.join(__dirname, 'connection.html')).href;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -196,7 +190,7 @@ function createWindow() {
     icon: path.join(__dirname, 'assets', 'icon.png')
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  mainWindow.loadFile(path.join(__dirname, connection.snapshot().requiresSetup ? 'connection.html' : 'index.html'));
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
   mainWindow.webContents.on('did-finish-load', () => {
@@ -258,9 +252,29 @@ function createTray() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  try {
+    connection = createConnectionStore({ directory: app.getPath('userData'), safeStorage, env: process.env });
+    await connection.initialize();
+  } catch {
+    dialog.showErrorBox('Configuration du poste', 'Adresse du serveur non autorisee. Aucun identifiant n a ete transmis.');
+    app.quit();
+    return;
+  }
   createWindow();
   createTray();
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: 'Fichier', submenu: [
+      { label: 'Configurer la connexion...', click: () => showConnection('', true) },
+      { label: 'Deconnecter ce poste', click: () => {
+        try { connection.forget(); showConnection('Ce poste est deconnecte. Les reservations restent sur le serveur.', true); }
+        catch { dialog.showErrorBox('Deconnexion', 'Impossible d effacer la connexion locale. Reessayez avant de partager ce poste.'); }
+      } },
+      { type: 'separator' },
+      { label: 'Quitter', click: () => { app.isQuitting = true; app.quit(); } }
+    ] },
+    { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' }
+  ]));
   connectToBackend();
 });
 
@@ -277,10 +291,25 @@ app.on('activate', () => {
 });
 
 ipcMain.handle('get-config', async () => ({
-  backendUrl: BACKEND_URL,
-  hasApiKey: Boolean(API_KEY),
-  hasCredentials: Boolean(API_KEY)
+  ...connection.snapshot(), setupMessage
 }));
+
+ipcMain.handle('save-connection', async (event, input) => {
+  if (!trustedConnectionSender(event)) return { success: false, message: 'Action non autorisee.' };
+  return connection.signIn(input);
+});
+
+ipcMain.handle('open-reservations', event => {
+  if (!trustedConnectionSender(event) || connection.snapshot().requiresSetup) return false;
+  setImmediate(showReservations);
+  return true;
+});
+
+ipcMain.handle('forget-connection', event => {
+  if (!trustedConnectionSender(event)) return { success: false, message: 'Action non autorisee.' };
+  try { connection.forget(); return { success: true }; }
+  catch { return { success: false, message: 'Impossible d effacer la connexion locale.' }; }
+});
 
 ipcMain.handle('get-reservations', async (_event, filters = {}) => {
   const searchParams = new URLSearchParams();
@@ -319,10 +348,11 @@ ipcMain.handle('confirm-reservation', async (_event, id) => {
   });
 });
 
-ipcMain.handle('cancel-reservation', async (_event, id) => {
+ipcMain.handle('cancel-reservation', async (_event, payload) => {
+  const { id, cancellationInitiator } = typeof payload === 'string' ? { id: payload } : payload;
   return apiRequest(`/api/reservations/${id}`, {
     method: 'PUT',
-    body: { status: 'cancelled' }
+    body: { status: 'cancelled', cancellationInitiator }
   });
 });
 

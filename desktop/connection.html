@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Connexion - Au Murmure des Flots</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="connection.css">
+</head>
+<body>
+  <main class="connection-layout">
+    <section class="connection-card" aria-labelledby="connection-title">
+      <img src="assets/logo.svg" alt="" class="connection-logo">
+      <p class="connection-brand">Au Murmure des Flots</p>
+      <h1 id="connection-title">Connecter ce poste</h1>
+      <p>Utilisez les identifiants administrateur de l'acc&egrave;s tablette. Ce portable ne contient aucune cl&eacute; d'acc&egrave;s pr&eacute;configur&eacute;e.</p>
+      <p class="connection-server">Serveur du restaurant<br><strong id="connection-server"></strong></p>
+      <form id="connection-form">
+        <div class="form-group">
+          <label for="connection-user">Nom d'utilisateur</label>
+          <input id="connection-user" name="username" autocomplete="username" maxlength="128" required>
+        </div>
+        <div class="form-group">
+          <label for="connection-password">Mot de passe</label>
+          <input id="connection-password" name="password" type="password" autocomplete="current-password" maxlength="1024" required>
+        </div>
+        <p id="connection-message" role="status" aria-live="polite"></p>
+        <button id="connection-submit" class="btn btn-primary" type="submit">V&eacute;rifier et connecter ce poste</button>
+      </form>
+      <p class="connection-note">Les identifiants sont enregistr&eacute;s chiffr&eacute;s dans votre profil Windows, pas dans ce fichier .exe. Ne partagez pas votre session Windows.</p>
+      <div class="connection-actions">
+        <button id="connection-back" class="btn btn-secondary" type="button" hidden>Revenir aux r&eacute;servations</button>
+        <button id="connection-forget" class="btn btn-secondary" type="button" hidden>Oublier la connexion de ce poste</button>
+      </div>
+      <p class="connection-note">La configuration ou la d&eacute;connexion de ce poste ne supprime aucune r&eacute;servation.</p>
+    </section>
+  </main>
+  <script src="connection-renderer.js"></script>
+</body>
+</html>

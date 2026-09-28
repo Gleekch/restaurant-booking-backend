@@ -48,7 +48,11 @@
     "files": [
       "desktop/**/*",
       "assets/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!**/.env{,.*}",
+      "!**/operator-connection*",
+      "!**/*.{pem,key,pfx,p12}",
+      "!desktop/**/__tests__/**"
     ],
     "win": {
       "target": "portable",

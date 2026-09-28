@@ -1,0 +1,16 @@
+body { overflow: auto; min-height: 100vh; height: auto; }
+.connection-layout { min-height: 100vh; display: grid; place-items: center; padding: 32px 20px; background: radial-gradient(ellipse at top left, #e9e6dc, transparent 65%); }
+.connection-card { width: min(100%, 480px); padding: 32px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-lg); }
+.connection-logo { width: 52px; height: 52px; }
+.connection-brand { margin: 8px 0 20px; font-weight: 600; }
+h1 { font-size: 24px; margin-bottom: 12px; letter-spacing: -0.5px; }
+.connection-card p { line-height: 1.6; }
+.connection-server { margin: 20px 0; padding: 12px; background: var(--surface-raised); border: 1px solid var(--border); border-radius: var(--radius-sm); overflow-wrap: anywhere; font-size: 12px; }
+.connection-note { margin-top: 16px; color: var(--text-secondary); font-size: 12px; }
+#connection-message { min-height: 24px; margin: 12px 0; color: var(--danger-text); }
+#connection-submit { width: 100%; justify-content: center; min-height: 44px; }
+.connection-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+[hidden] { display: none !important; }
+button:disabled { opacity: 0.55; cursor: wait; }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+@media (max-width: 520px) { .connection-layout { padding: 16px; } .connection-card { padding: 24px; } }

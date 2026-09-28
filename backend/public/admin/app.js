@@ -278,11 +278,11 @@ async function renderTodayView() {
             <div class="service-header midi" style="${isServiceBlocked('midi') ? 'opacity:0.6;' : ''}">
                 <span class="icon">☀️</span>
                 <h3>Service du Midi ${isServiceBlocked('midi') ? '<span style="background:#dc2626;color:white;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h3>
-                <span class="service-count">${midi.length} rés. / ${midiCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
+                <span class="service-count">${midi.length} rés. / ${midiCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>${renderOnlineClosure(dateISO, 'midi')}
             </div>
             ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
             <div style="text-align:right; margin: 8px 14px 0;">
-              <button class="btn-block-service" data-date="${dateISO}" data-service="midi" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">🔒 Marquer complet</button>
+              <button class="btn-block-service" data-date="${dateISO}" data-service="midi" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">Marquer complet</button>
             </div>
             ${midi.length === 0 ?
                 '<div class="empty-state"><p>Aucune réservation pour le midi</p></div>' :
@@ -294,11 +294,11 @@ async function renderTodayView() {
             <div class="service-header soir" style="${isServiceBlocked('soir') ? 'opacity:0.6;' : ''}">
                 <span class="icon">🌙</span>
                 <h3>Service du Soir ${isServiceBlocked('soir') ? '<span style="background:#dc2626;color:white;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h3>
-                <span class="service-count">${soir.length} rés. / ${soirCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>
+                <span class="service-count">${soir.length} rés. / ${soirCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>${renderOnlineClosure(dateISO, 'soir')}
             </div>
             ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
             <div style="text-align:right; margin: 8px 14px 0;">
-              <button class="btn-block-service" data-date="${dateISO}" data-service="soir" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">🔒 Marquer complet</button>
+              <button class="btn-block-service" data-date="${dateISO}" data-service="soir" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">Marquer complet</button>
             </div>
             ${soir.length === 0 ?
                 '<div class="empty-state"><p>Aucune réservation pour le soir</p></div>' :
@@ -327,12 +327,12 @@ function renderPendingView() {
     content.innerHTML = `
         <div class="pending-header">
             <div class="pending-info">
-                <h2>⏳ Réservations en attente</h2>
+                <h2>Réservations en attente</h2>
                 <p>${pending.length} réservation(s) / ${totalCovers} couvert(s)</p>
             </div>
             ${pending.length > 0 ? `
                 <button class="btn-confirm-all" onclick="confirmAllPending()">
-                    ✅ Tout confirmer
+                    Tout confirmer
                 </button>
             ` : ''}
         </div>
@@ -421,12 +421,13 @@ function renderMonthView() {
                 const dayClasses = ['month-day', isToday ? 'month-today' : '', isOutside ? 'month-outside' : '', midi.length > 0 ? 'has-midi' : '', soir.length > 0 ? 'has-soir' : ''].filter(Boolean).join(' ');
 
                 return `
-                    <div class="${dayClasses}" data-day-date="${dateISO}">
-                        <div class="month-day-num">${day.getDate()}</div>
+                    <div class="${dayClasses}" data-day-date="${dateISO}" tabindex="0" role="button" aria-label="${day.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}">
+                        <div class="month-day-num">${day.getDate()}<small class="month-day-short">${day.toLocaleDateString('fr-FR', { weekday: 'short' })}</small></div>
+                        <span class="month-closure">${renderOnlineClosure(dateISO, 'midi') || (renderOnlineClosure(dateISO, 'soir') ? '<span class="closure-badge">Soir fermé en ligne</span>' : '')}</span>
                         ${active.length > 0 ? `
-                            <div class="month-day-midi"><span class="icon">☀️</span> ${midi.length}r / ${midiCovers}c</div>
-                            <div class="month-day-soir"><span class="icon">🌙</span> ${soir.length}r / ${soirCovers}c</div>
-                        ` : ''}
+                            <div class="month-day-midi">Midi · ${midi.length} rés. / ${midiCovers} couv.</div>
+                            <div class="month-day-soir">Soir · ${soir.length} rés. / ${soirCovers} couv.</div>
+                        ` : '<span class="month-day-empty">Aucune réservation</span>'}
                     </div>
                 `;
             }).join('')}
@@ -441,7 +442,13 @@ function renderMonthView() {
         currentMonthDate.setMonth(currentMonthDate.getMonth() + 1);
         renderMonthView();
     });
+    if (window.matchMedia('(max-width: 700px)').matches) {
+        document.querySelector('.month-today')?.scrollIntoView({ block: 'center' });
+    }
     document.querySelectorAll('[data-day-date]').forEach(el => {
+        el.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); el.click(); }
+        });
         el.addEventListener('click', () => {
             showDayDetail(el.dataset.dayDate);
         });
@@ -465,7 +472,7 @@ async function showDayDetail(dateISO) {
         const blocked = isServiceBlocked(service);
         const tag = blocked ? '<span style="background:#dc2626;color:white;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : '';
         return `${tag}<div style="text-align:right; margin:8px 14px 0;">
-            <button class="btn-block-service" data-date="${dateISO}" data-service="${service}" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">🔒 Marquer complet</button>
+            <button class="btn-block-service" data-date="${dateISO}" data-service="${service}" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">Marquer complet</button>
         </div>`;
     };
 
@@ -486,13 +493,13 @@ async function showDayDetail(dateISO) {
         </div>
         <div class="service-section">
             <div class="service-header midi"><span>☀️</span><h3>Midi</h3><span class="service-count">${midi.length} rés. / ${midi.reduce((s, r) => s + r.numberOfPeople, 0)} couv.</span></div>
-            ${blockBtn('midi')}
+            ${renderOnlineClosure(dateISO, 'midi')}${blockBtn('midi')}
             ${midi.length === 0 ? '<div class="empty-state"><p>Aucune réservation</p></div>' :
                 `<div class="reservations-grid">${midi.map(r => renderReservationCard(r)).join('')}</div>`}
         </div>
         <div class="service-section">
             <div class="service-header soir"><span>🌙</span><h3>Soir</h3><span class="service-count">${soir.length} rés. / ${soir.reduce((s, r) => s + r.numberOfPeople, 0)} couv.</span></div>
-            ${blockBtn('soir')}
+            ${renderOnlineClosure(dateISO, 'soir')}${blockBtn('soir')}
             ${soir.length === 0 ? '<div class="empty-state"><p>Aucune réservation</p></div>' :
                 `<div class="reservations-grid">${soir.map(r => renderReservationCard(r)).join('')}</div>`}
         </div>
@@ -522,17 +529,18 @@ function depositBadge(r) {
     const map = {
         refund_failed: `<span class='deposit-badge failed'>Remboursement echoue - verification necessaire</span>`,
         refund_review: `<span class='deposit-badge failed'>Remboursement a verifier dans Stripe</span>`,
-        awaiting: `<span class="deposit-badge awaiting">⏳ Arrhes non payées</span>`,
-        paid:     `<span class="deposit-badge paid">💶 Arrhes ${amount} payées</span>`,
-        refund_pending: `<span class="deposit-badge awaiting">⏳ Remboursement en cours</span>`,
-        deducted: `<span class="deposit-badge deducted">✓ Arrhes déduites (${amount})</span>`,
-        refunded: `<span class="deposit-badge refunded">↩ Arrhes remboursées</span>`,
-        failed:   `<span class="deposit-badge failed">⚠ Paiement non abouti</span>`
+        awaiting: `<span class="deposit-badge awaiting">Arrhes non payées</span>`,
+        paid:     `<span class="deposit-badge paid">Arrhes ${amount} payées</span>`,
+        refund_pending: `<span class="deposit-badge awaiting">Remboursement en cours</span>`,
+        deducted: `<span class="deposit-badge deducted">Arrhes déduites (${amount})</span>`,
+        refunded: `<span class="deposit-badge refunded">Arrhes remboursées</span>`,
+        failed:   `<span class="deposit-badge failed">Paiement non abouti</span>`
     };
     return map[d.status] || '';
 }
 
 function depositActions(r) {
+    if (!window.ServiceRelease.financeEnabled) return '';
     const d = r.deposit;
     if (!d) return '';
     if (d.status === 'refund_pending') {
@@ -552,19 +560,19 @@ function depositActions(r) {
 function renderReservationCard(r) {
     const badge = depositBadge(r);
     return `
-        <div class="reservation-card status-${escapeHtml(r.status)}" data-id="${safeReservationId(r._id)}">
+        <div class="reservation-card status-${escapeHtml(r.status)}" data-id="${safeReservationId(r._id)}" tabindex="0" role="button" aria-label="Voir la réservation de ${escapeHtml(r.customerName)} à ${escapeHtml(r.time)}">
             <div class="card-header">
                 <span class="card-time">${escapeHtml(r.time)}</span>
                 <span class="card-status ${escapeHtml(r.status)}">${escapeHtml(STATUS_TEXT[r.status] || r.status)}</span>
             </div>
             <div class="card-name">${escapeHtml(r.customerName)}</div>
-            <div class="card-info">
-                <span><span class="icon">👥</span> ${escapeHtml(r.numberOfPeople)}</span>
-                <span><span class="icon">📱</span> ${escapeHtml(r.phoneNumber)}</span>
+            <div class="guest-line"><span><strong>${escapeHtml(r.numberOfPeople)}</strong> couverts</span><span>${r.table ? 'Table ' + escapeHtml(r.table) : 'Table à attribuer'}</span></div>
+            <div class="guest-phone">${escapeHtml(r.phoneNumber)}</div>
+            <div class="card-deposit">${badge}
+                ${r.depositException ? '<span class="deposit-badge exception">Exception sans arrhes</span>' : ''}
+                ${r.arrivedAt ? '<span class="presence-badge">Client installé</span>' : ''}
             </div>
-            ${badge ? `<div class="card-deposit">${badge}</div>` : ''}
-            ${r.specialRequests ? `<div class="card-notes"><span class="icon">💬</span> ${escapeHtml(r.specialRequests)}</div>` : ''}
-            ${depositActions(r)}
+            ${r.specialRequests ? `<div class="card-notes"><strong>Attention particulière</strong>${escapeHtml(r.specialRequests)}</div>` : ''}
         </div>
     `;
 }
@@ -589,8 +597,8 @@ function renderPendingCard(r) {
                 ${r.specialRequests ? `<p><span class="icon">💬</span> ${escapeHtml(r.specialRequests)}</p>` : ''}
             </div>
             <div class="pending-actions">
-                <button class="btn-confirm" onclick="updateStatus('${safeReservationId(r._id)}', 'confirmed')"><span class="icon">✅</span> Confirmer</button>
-                <button class="btn-cancel" onclick="updateStatus('${safeReservationId(r._id)}', 'cancelled')"><span class="icon">❌</span> Annuler</button>
+                <button class="btn-confirm" onclick="updateStatus('${safeReservationId(r._id)}', 'confirmed')">Confirmer</button>
+                <button class="btn-cancel" onclick="updateStatus('${safeReservationId(r._id)}', 'cancelled')">Annuler</button>
             </div>
         </div>
     `;
@@ -626,14 +634,14 @@ function renderDayCard(day) {
             <div class="day-name">${dayNames[day.getDay()]}</div>
             <div class="day-date">${day.getDate()}/${day.getMonth() + 1}</div>
             <div class="day-service midi" data-date="${dateISO}" data-service="midi">
-                <div class="day-service-label"><span class="icon">☀️</span> Midi</div>
+                ${renderOnlineClosure(dateISO, 'midi')}<div class="day-service-label">Midi</div>
                 <div class="day-service-count">${midiCovers}</div>
                 <div class="progress-bar">
                     <div class="progress-fill ${getProgressClass(midiCovers)}" style="width: ${Math.min(midiCovers/50*100, 100)}%"></div>
                 </div>
             </div>
             <div class="day-service soir" data-date="${dateISO}" data-service="soir">
-                <div class="day-service-label"><span class="icon">🌙</span> Soir</div>
+                ${renderOnlineClosure(dateISO, 'soir')}<div class="day-service-label">Soir</div>
                 <div class="day-service-count">${soirCovers}</div>
                 <div class="progress-bar">
                     <div class="progress-fill ${getProgressClass(soirCovers)}" style="width: ${Math.min(soirCovers/50*100, 100)}%"></div>
@@ -665,7 +673,7 @@ async function showDayServiceDetail(dateISO, service) {
     content.innerHTML = `
         <button class="back-btn" onclick="renderWeekView()">← Retour</button>
         <div class="summary-card">
-            <h2 class="summary-title">${serviceName} - ${dateStr} ${blocked ? '<span style="background:#dc2626;color:white;font-size:11px;padding:2px 8px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h2>
+            <h2 class="summary-title">${renderOnlineClosure(dateISO, service)} ${serviceName} - ${dateStr} ${blocked ? '<span style="background:#dc2626;color:white;font-size:11px;padding:2px 8px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h2>
             <div class="summary-stats">
                 <div class="stat-item">
                     <div class="stat-value">${filtered.length}</div>
@@ -677,7 +685,7 @@ async function showDayServiceDetail(dateISO, service) {
                 </div>
             </div>
             <div style="text-align:right; margin-top:12px;">
-              <button class="btn-block-service" data-date="${dateISO}" data-service="${service}" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">🔒 Marquer complet</button>
+              <button class="btn-block-service" data-date="${dateISO}" data-service="${service}" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">Marquer complet</button>
             </div>
         </div>
 
@@ -701,10 +709,16 @@ async function showDayServiceDetail(dateISO, service) {
 // Attach Card Click Listeners
 function attachCardListeners() {
     document.querySelectorAll('.reservation-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const id = card.dataset.id;
-            const reservation = reservations.find(r => r._id === id);
+        card.addEventListener('click', event => {
+            // Financial buttons have their own action; do not open a second dialog.
+            if (event.target.closest('button, a, input, select, textarea')) return;
+            const reservation = reservations.find(r => r._id === card.dataset.id);
             if (reservation) showReservationDetail(reservation);
+        });
+        card.addEventListener('keydown', event => {
+            if (event.target === card && (event.key === 'Enter' || event.key === ' ')) {
+                event.preventDefault(); card.click();
+            }
         });
     });
 }
@@ -753,6 +767,7 @@ function showReservationDetail(r) {
                 <span class="detail-label">Personnes</span>
                 <span class="detail-value">${escapeHtml(r.numberOfPeople)}</span>
             </div>
+            <div class="detail-row"><span class="detail-label">Table</span><span class="detail-value">${escapeHtml(r.table || 'À attribuer')}</span></div>
             ${depositRow}
             <div class="detail-row">
                 <span class="detail-label">Téléphone</span>
@@ -772,21 +787,19 @@ function showReservationDetail(r) {
             ` : ''}
         </div>
 
+        ${window.ServiceRelease.financePanel()}
         <div class="detail-actions">
             ${r.status !== 'confirmed' ? `
-                <button class="btn btn-success" onclick="updateStatus('${safeReservationId(r._id)}', 'confirmed'); closeModal();"><span class="icon">✅</span> Confirmer</button>
+                <button class="btn btn-success" onclick="updateStatus('${safeReservationId(r._id)}', 'confirmed'); closeModal();">Confirmer</button>
             ` : ''}
             ${!['cancelled', 'awaiting-payment'].includes(r.status) ? `
-                <button class="btn btn-danger" onclick="updateStatus('${safeReservationId(r._id)}', 'cancelled'); closeModal();"><span class="icon">❌</span> Annuler</button>
-            ` : ''}
-            ${r.email && ['pending','confirmed'].includes(r.status) && (!r.deposit || r.deposit.status === 'none' || r.deposit.status === 'failed') ? `
-                <button class="btn btn-deposit-request" onclick="requestDeposit('${safeReservationId(r._id)}')">💶 Demander les arrhes</button>
+                <button class="btn btn-danger" onclick="updateStatus('${safeReservationId(r._id)}', 'cancelled'); closeModal();">Annuler</button>
             ` : ''}
             ${['pending','confirmed'].includes(r.status) ? `
-                <button class="btn btn-success" onclick="markCompleted('${safeReservationId(r._id)}')"><span class="icon">🍽️</span> Client arrivé</button>
-                <button class="btn btn-warning" onclick="markNoShow('${safeReservationId(r._id)}')"><span class="icon">🚫</span> No-show</button>
+                <button class="btn btn-secondary" disabled data-unavailable aria-describedby="release-finance-note" title="Suivi d arrivee indisponible dans cette version">Client installé</button>
+                <button class="btn btn-warning" onclick="markNoShow('${safeReservationId(r._id)}')">No-show</button>
             ` : ''}
-            <button class="btn btn-secondary" onclick="openEditForm('${safeReservationId(r._id)}')">✏️ Modifier</button>
+            <button class="btn btn-secondary" onclick="openEditForm('${safeReservationId(r._id)}')">Modifier</button>
             <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
         </div>
     `;
@@ -912,6 +925,7 @@ async function updateStatus(id, status) {
 
 // Marquer un client comme arrivé (réservation terminée, arrhes déduites)
 async function markCompleted(id) {
+    if (!window.ServiceRelease.financeEnabled) return window.ServiceRelease.explain();
     if (!confirm('Marquer ce client comme arrivé ? (les arrhes éventuelles seront déduites de l\'addition)')) return;
     try {
         const response = await apiFetch(`${API_URL}/api/reservations/${id}/complete`, { method: 'POST' });
@@ -940,6 +954,7 @@ async function markNoShow(id) {
 
 // Envoyer un lien de paiement des arrhes au client (groupes téléphone/desktop)
 async function requestDeposit(id) {
+    if (!window.ServiceRelease.financeEnabled) return window.ServiceRelease.explain();
     if (!confirm('Envoyer un lien de paiement des arrhes par email au client ?')) return;
     try {
         const response = await apiFetch(`${API_URL}/api/reservations/${id}/deposit/request`, { method: 'POST' });
@@ -955,6 +970,7 @@ async function requestDeposit(id) {
 
 // Rembourser les arrhes
 async function refundDepositReservation(id, pending = false) {
+    if (!window.ServiceRelease.financeEnabled) return window.ServiceRelease.explain();
     const question = pending
         ? 'Vérifier et relancer ce remboursement en attente ?'
         : 'Rembourser les arrhes de cette réservation ?';
@@ -972,6 +988,7 @@ async function refundDepositReservation(id, pending = false) {
 
 // Marquer les arrhes comme déduites de l'addition
 async function markDepositDeducted(id) {
+    if (!window.ServiceRelease.financeEnabled) return window.ServiceRelease.explain();
     if (!confirm('Marquer les arrhes comme déduites de l\'addition ?')) return;
     try {
         const response = await apiFetch(`${API_URL}/api/reservations/${id}/deposit/deducted`, { method: 'POST' });
@@ -1132,7 +1149,7 @@ function attachBlockButtons(rerender) {
     document.querySelectorAll('.btn-block-service').forEach(btn => {
         const service = btn.dataset.service;
         const blocked = isServiceBlocked(service);
-        btn.textContent = blocked ? '🔓 Débloquer' : '🔒 Marquer complet';
+        btn.textContent = blocked ? '🔓 Débloquer' : 'Marquer complet';
         btn.style.borderColor = blocked ? 'var(--success)' : 'var(--danger)';
         btn.style.color = blocked ? 'var(--success-text)' : 'var(--danger-text)';
 
@@ -1146,4 +1163,11 @@ function attachBlockButtons(rerender) {
 // Service Worker Registration for PWA
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+
+function renderOnlineClosure(dateISO, service) {
+    const day = new Date(String(dateISO).slice(0, 10) + 'T12:00:00Z').getUTCDay();
+    return day === 1 || day === 2 || (day === 0 && service === 'soir')
+        ? '<span class="closure-badge">Fermé en ligne</span>' : '';
 }

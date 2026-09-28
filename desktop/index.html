@@ -5,25 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://fonts.gstatic.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://restaurant-booking-backend-y3sp.onrender.com;">
     <title>Au Murmure des Flots</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="service-ui.css">
 </head>
 <body>
     <div class="shell">
         <!-- Rail sombre compact -->
-        <nav class="rail">
+        <nav class="rail" aria-label="Navigation principale">
+            <img class="rail-logo" src="assets/brand-spiral.svg" alt="Au Murmure des Flots" width="52" height="52">
             <div class="rail-nav">
-                <a href="#" data-view="today" class="rail-item active" title="Aujourd'hui"><span class="rail-icon">📅</span></a>
-                <a href="#" data-view="pending" class="rail-item" title="À confirmer"><span class="rail-icon">⏳</span></a>
-                <a href="#" data-view="week" class="rail-item" title="Semaine"><span class="rail-icon">📆</span></a>
-                <a href="#" data-view="month" class="rail-item" title="Mois"><span class="rail-icon">🗓️</span></a>
-                <a href="#" data-view="clients" class="rail-item" title="Clients"><span class="rail-icon">👥</span></a>
-                <a href="#" data-view="statistics" class="rail-item" title="Statistiques"><span class="rail-icon">📊</span></a>
+                <a href="#" data-view="today" class="rail-item active" title="Aujourd'hui"><span class="rail-icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4m8-4v4M4 11h16m-11 4h2v2H9z"/></svg></span></a>
+                <a href="#" data-view="pending" class="rail-item" title="À confirmer"><span class="rail-icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg></span></a>
+                <a href="#" data-view="week" class="rail-item" title="Semaine"><span class="rail-icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4m8-4v4M3 11h18m-12 0v10m6-10v10"/></svg></span></a>
+                <a href="#" data-view="month" class="rail-item" title="Mois"><span class="rail-icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4m8-4v4M3 11h18m-12 0v10m6-10v10M3 16h18"/></svg></span></a>
+                <a href="#" data-view="clients" class="rail-item" title="Clients"><span class="rail-icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v3"/></svg></span></a>
+                <a href="#" data-view="statistics" class="rail-item" title="Statistiques"><span class="rail-icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v18h17M8 17v-5m5 5V7m5 10V4"/></svg></span></a>
             </div>
             <div class="rail-bottom">
-                <button id="add-reservation-btn" class="rail-add" title="Nouvelle réservation"><span class="rail-icon">＋</span></button>
+                <button id="add-reservation-btn" class="rail-add" title="Nouvelle réservation"><span class="rail-icon"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg></span></button>
             </div>
         </nav>
 
@@ -32,8 +31,7 @@
             <!-- App bar (niveau 1) -->
             <div class="app-bar">
                 <div class="app-bar-left">
-                    <img src="assets/logo.svg" alt="" class="app-logo">
-                    <span class="app-name">Au Murmure des Flots</span>
+                    <div class="brand-lockup"><span class="app-name">Au Murmure des Flots</span></div>
                 </div>
                 <div class="app-bar-right">
                     <span id="current-date" class="app-meta"></span>
@@ -47,21 +45,21 @@
                 <h2 id="reservations-title" class="view-title">Aujourd'hui</h2>
                 <div class="view-bar-actions">
                     <div class="filters">
-                        <input type="date" id="date-filter" class="filter-input">
-                        <select id="service-filter" class="filter-input">
+                        <input type="date" id="date-filter" aria-label="Date du planning" class="filter-input">
+                        <select id="service-filter" aria-label="Filtrer par service" class="filter-input">
                             <option value="all">Tous services</option>
                             <option value="midi">Midi</option>
                             <option value="soir">Soir</option>
                         </select>
-                        <select id="status-filter" class="filter-input">
+                        <select id="status-filter" aria-label="Filtrer par statut" class="filter-input">
                             <option value="all">Tous statuts</option>
                             <option value="pending">En attente</option>
                             <option value="confirmed">Confirmées</option>
                             <option value="cancelled">Annulées</option>
                         </select>
-                        <input type="text" id="search-input" class="filter-input filter-search" placeholder="Rechercher...">
+                        <input type="text" id="search-input" aria-label="Rechercher une réservation" class="filter-input filter-search" placeholder="Rechercher...">
                     </div>
-                    <button id="show-qr-btn" class="btn-tool" title="Accès tablette">📱</button>
+                    <button id="show-qr-btn" class="btn-tool" title="Accès tablette" aria-label="Accès tablette"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M10 18h4"/></svg></button>
                 </div>
             </div>
 
@@ -183,9 +181,9 @@
                 <div class="modal-actions">
                     <button id="confirm-btn" class="btn btn-success">Confirmer</button>
                     <button id="cancel-btn" class="btn btn-danger">Annuler</button>
-                    <button id="deposit-request-btn" class="btn btn-deposit-request" style="display:none">💶 Demander les arrhes</button>
-                    <button id="completed-btn" class="btn btn-success" style="display:none">🍽️ Client arrivé</button>
-                    <button id="noshow-btn" class="btn btn-warning" style="display:none">🚫 No-show</button>
+                    <button id="deposit-request-btn" class="btn btn-deposit-request" disabled data-unavailable aria-describedby="release-finance-note" title="Fonction en preparation">Demander les arrhes</button>
+                    <button id="completed-btn" class="btn btn-secondary" disabled data-unavailable aria-describedby="release-finance-note" style="display:none" title="Suivi d arrivee indisponible dans cette version">Client installé</button>
+                    <button id="noshow-btn" class="btn btn-warning" style="display:none">No-show</button>
                     <button id="edit-btn" class="btn btn-secondary">Modifier</button>
                 </div>
             </div>
@@ -210,6 +208,8 @@
         </div>
     </div>
 
+    <script src="release-controls.js"></script>
+    <script src="service-ui.js"></script>
     <script type="module" src="renderer.js"></script>
 </body>
 </html>
