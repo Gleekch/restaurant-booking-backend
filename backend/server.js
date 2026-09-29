@@ -10,21 +10,12 @@ const { startReminderScheduler } = require('./services/reminderService');
 const { startRefundReconciliationScheduler } = require('./services/depositRefundService');
 const Reservation = require('./models/Reservation');
 const { isDepositSystemActive } = require('./services/paymentService');
+const { configureProxy } = require('./config/proxy');
+const { allowedOrigins, corsOptions, corsErrorHandler } = require('./config/cors');
 
 const app = express();
+configureProxy(app);
 const server = http.createServer(app);
-
-// CORS — whitelist stricte
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:5173',
-  'http://localhost:5174',
-  'https://www.aumurmuredesflots.com',
-  'https://aumurmuredesflots.com',
-  'https://resa-aumurmuredesflots.onrender.com',
-  'https://restaurant-booking-backend-y3sp.onrender.com'
-];
 
 const io = socketIo(server, {
   cors: {
@@ -33,19 +24,8 @@ const io = socketIo(server, {
   }
 });
 
-app.use(cors({
-  origin: function(origin, callback) {
-    // Autoriser les requêtes sans origine (Electron, curl, Postman)
-    if (!origin) return callback(null, true);
-    if (origin.startsWith('file://') || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('CORS non autorisé'), false);
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-}));
+app.use(cors(corsOptions));
+app.use(corsErrorHandler);
 
 // ─── Webhook Stripe ───
 // DOIT être monté AVANT express.json() : la vérification de signature
