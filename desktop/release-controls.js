@@ -6,7 +6,7 @@
         financeEnabled: false,
         explain: () => window.alert(reason),
         financePanel: (includeRequest = true) => '<section class="release-finance-panel" aria-label="Fonctions en pr\u00e9paration"><p id="release-finance-note" class="release-note">' + reason + '</p><div class="release-finance-actions">' +
-            (includeRequest ? button('Demander les arrhes') : '') + button('D\u00e9duire en caisse') + button('Rembourser') + '</div></section>'
+            (includeRequest ? button('Demander les arrhes') : '') + button('D\u00e9duire en caisse') + '</div></section>'
     });
     document.addEventListener('DOMContentLoaded', () => {
         const bar = document.querySelector('.app-bar');

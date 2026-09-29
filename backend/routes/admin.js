@@ -20,7 +20,7 @@ router.get('/config.js', (_req, res) => {
   res.type('application/javascript');
   res.send('window.__API_KEY = "";');
 });
-router.get(['/service-ui.css', '/service-ui.js', '/release-controls.js', '/reservation-changes.js', '/service-rhythm.js'], (req, res) => {
+router.get(['/service-ui.css', '/service-ui.js', '/release-controls.js', '/reservation-changes.js', '/service-rhythm.js', '/staff-tools.css', '/staff-insights.js', '/floor-plan.js'], (req, res) => {
   res.sendFile(path.join(__dirname, '../../desktop', path.basename(req.path)));
 });
 // Share only the brand assets used by both staff interfaces.

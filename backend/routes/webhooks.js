@@ -66,7 +66,7 @@ async function handleCheckoutPaid(session, io) {
       return { duplicate: true, reservation: before };
     }
     const cancelled = before.status === 'cancelled';
-    if (before.deposit.status !== 'awaiting' && !(cancelled && before.deposit.status === 'failed')) {
+    if (!['awaiting', 'failed'].includes(before.deposit.status)) {
       throw new Error(`Transition de paiement refusee pour la reservation ${reservationId}`);
     }
     onlineFlow = before.status === 'awaiting-payment';
@@ -74,7 +74,8 @@ async function handleCheckoutPaid(session, io) {
       'deposit.status': cancelled ? 'refund_pending' : 'paid',
       'deposit.stripeSessionId': session.id,
       'deposit.stripePaymentIntentId': intentId,
-      'deposit.paidAt': new Date()
+      'deposit.paidAt': new Date(),
+      'deposit.checkoutReviewReason': null
     };
     if (onlineFlow) setFields.status = 'pending';
     // Record the refund obligation in the SAME write as the late payment.
@@ -132,7 +133,7 @@ async function handleCheckoutUnavailable(session, io) {
   if (before.deposit.stripeSessionId && before.deposit.stripeSessionId !== session.id) return { stale: true };
 
   const onlineFlow = before.status === 'awaiting-payment';
-  const setFields = { 'deposit.status': 'failed', 'deposit.stripeSessionId': session.id };
+  const setFields = { 'deposit.status': 'failed', 'deposit.stripeSessionId': session.id, 'deposit.checkoutReviewReason': null };
   if (onlineFlow) {
     setFields.status = 'cancelled';
     setFields.activeBookingKey = null;
@@ -141,6 +142,7 @@ async function handleCheckoutUnavailable(session, io) {
   const reservation = await Reservation.findOneAndUpdate(
     {
       _id: reservationId,
+      status: before.status,
       'deposit.status': 'awaiting',
       'deposit.checkoutAttempt': checkoutAttempt,
       $or: [

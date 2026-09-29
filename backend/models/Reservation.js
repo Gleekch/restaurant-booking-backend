@@ -51,6 +51,12 @@ const reservationSchema = new mongoose.Schema({
     required: true
   },
   bookingRequestKey: { type: String, default: null },
+  clientNotification: {
+    type: new mongoose.Schema({ state: { type: String, enum: ['sending', 'sent', 'failed'] },
+      kind: String, attempt: String, fingerprint: String, attemptedAt: Date, completedAt: Date, code: String
+    }, { _id: false }),
+    default: undefined
+  },
   bookingRequestFingerprint: { type: String, default: null },
   activeBookingKey: { type: String, default: null },
   status: {
@@ -70,6 +76,8 @@ const reservationSchema = new mongoose.Schema({
     },
     checkoutAttempt: { type: Number, default: 0, min: 0 },
     checkoutParameters: { type: mongoose.Schema.Types.Mixed, default: null },
+    checkoutCheckedAt: { type: Date },
+    checkoutReviewReason: { type: String },
     stripeSessionId: { type: String, default: null },
     stripeCheckoutUrl: { type: String, default: null },
     stripePaymentIntentId: { type: String, default: null },

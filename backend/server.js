@@ -79,6 +79,7 @@ app.post('/api/reservations', reservationLimiter);
 // GET /api/reservations/availability — public (calendrier client)
 // Les routes internes (GET list, POST /desktop, PUT, DELETE) sont protégées dans le router
 app.use('/api/reservations', require('./routes/reservations'));
+app.use('/api/floor-plans', require('./routes/floorPlans'));
 
 // Blocages manuels de services (GET public, POST/DELETE protégés dans le router)
 app.use('/api/blocked-services', require('./routes/blockedServices'));

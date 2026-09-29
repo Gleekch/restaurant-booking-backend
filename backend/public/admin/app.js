@@ -13,6 +13,17 @@ const API_URL = window.location.origin;
 let reservations = [];
 let currentView = 'today';
 let blockedServicesCache = []; // services bloqués pour la date affichée
+let createInFlight = false;
+let editInFlight = false;
+let createRequestKey = null;
+let createFingerprint = null;
+let floorPlanTarget = null;
+
+async function floorPlanRequest(endpoint, options = {}) {
+    const response = await apiFetch(endpoint, { ...options, signal: AbortSignal.timeout(20000), headers: { 'Content-Type': 'application/json' }, body: options.body ? JSON.stringify(options.body) : undefined });
+    if (response.status === 401) throw new Error('Connexion requise. Reconnectez-vous avant de sauvegarder.');
+    return response.json();
+}
 
 const ONLINE_CAPACITY_LIMIT = 50;
 
@@ -33,6 +44,7 @@ const pendingBadge = document.getElementById('pending-badge');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    window.FloorPlan.watch(document.body, () => reservations, floorPlanRequest);
     initNavigation();
     initNewReservationForm();
     document.getElementById('reconnect-button')?.addEventListener('click', () => window.location.reload());
@@ -45,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Navigation
 function initNavigation() {
     document.querySelectorAll('.rail-item').forEach(item => {
-        item.addEventListener('click', (e) => {
+        item.addEventListener('click', async (e) => {
             e.preventDefault();
             const view = item.dataset.view;
 
@@ -53,6 +65,8 @@ function initNavigation() {
                 openNewModal();
                 return;
             }
+
+            if (currentView === 'floor-plan' && view !== currentView && !await window.FloorPlan.canLeave(document.getElementById('staff-floor-plan'))) return;
 
             document.querySelectorAll('.rail-item').forEach(i => i.classList.remove('active'));
             item.classList.add('active');
@@ -129,6 +143,23 @@ function updatePendingBadge() {
 function renderView() {
     window.ReservationChanges?.updateQueue(reservations, showReservationDetail);
     switch (currentView) {
+        case 'floor-plan': {
+            if (!document.getElementById('staff-floor-plan')) content.innerHTML = '<div id="staff-floor-plan" data-floor-plan></div>';
+            window.FloorPlan.mount(document.getElementById('staff-floor-plan'), {
+                ...floorPlanTarget,
+                request: floorPlanRequest,
+                onSaved: () => { loadReservations(); },
+                onOpenReservation: id => { const r = reservations.find(r => r._id === id); if (r) showReservationDetail(r); }
+            });
+            floorPlanTarget = null;
+            break;
+        }
+        case 'clients':
+        case 'statistics': {
+            if (!content.querySelector('[data-staff-insights]')) content.innerHTML = '<div data-staff-insights></div>';
+            window.StaffInsights.mount(content.querySelector('[data-staff-insights]'), currentView, reservations, showReservationDetail);
+            break;
+        }
         case 'today':
             renderTodayView();
             break;
@@ -186,6 +217,8 @@ async function renderTodayView() {
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const dateISO = displayDate.getFullYear() + '-' + String(displayDate.getMonth()+1).padStart(2,'0') + '-' + String(displayDate.getDate()).padStart(2,'0');
     await loadBlockedServices(dateISO);
+
+    if (currentView !== 'today') return;
 
     content.innerHTML = `
         <div class="summary-card">
@@ -386,7 +419,9 @@ function renderMonthView() {
 
 // Show day detail from month view
 async function showDayDetail(dateISO) {
+    const originatingView = currentView;
     await loadBlockedServices(dateISO);
+    if (currentView !== originatingView) return;
     const [y, m, d] = dateISO.split('-').map(Number);
     const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
@@ -471,6 +506,12 @@ function depositBadge(r) {
     return map[d.status] || '';
 }
 
+function clientEmailNotice(r) {
+    const state = r.clientNotification?.state;
+    if (!state || state === 'sent') return '';
+    return `<p class="card-notes" role="status">${state === 'failed' ? 'Email non envoye : contacter le client ou relancer depuis sa fiche.' : 'Email en cours ou a verifier.'}</p>`;
+}
+
 function depositActions(r) {
     if (!window.ServiceRelease.financeEnabled) return '';
     const d = r.deposit;
@@ -485,7 +526,6 @@ function depositActions(r) {
     return `
         <div class="deposit-actions">
             <button class="btn-deposit-deduct" onclick="markDepositDeducted('${safeReservationId(r._id)}')">Déduire de l'addition</button>
-            <button class="btn-deposit-refund" onclick="refundDepositReservation('${safeReservationId(r._id)}')">Rembourser</button>
         </div>`;
 }
 
@@ -499,7 +539,8 @@ function renderReservationCard(r) {
             </div>
             <div class="card-name">${escapeHtml(r.customerName)}</div>
             ${window.ReservationChanges?.badge(r) || ''}
-            <div class="guest-line"><span><strong>${escapeHtml(r.numberOfPeople)}</strong> couverts</span><span>${r.table ? 'Table ' + escapeHtml(r.table) : 'Table à attribuer'}</span></div>
+            ${clientEmailNotice(r)}
+            <div class="guest-line"><span><strong>${escapeHtml(r.numberOfPeople)}</strong> couverts</span>${window.FloorPlan.tableLabel(r)}</div>
             <div class="guest-phone">${escapeHtml(r.phoneNumber)}</div>
             <div class="card-deposit">${badge}
                 ${r.depositException ? '<span class="deposit-badge exception">Exception sans arrhes</span>' : ''}
@@ -527,6 +568,7 @@ function renderPendingCard(r) {
                 <p><span class="icon">👥</span> ${escapeHtml(r.numberOfPeople)} personne(s)</p>
                 <p><span class="icon">📱</span> ${escapeHtml(r.phoneNumber)}</p>
                 ${depositBadge(r) ? `<p>${depositBadge(r)}</p>` : ''}
+                ${clientEmailNotice(r)}
                 ${r.specialRequests ? `<p><span class="icon">💬</span> ${escapeHtml(r.specialRequests)}</p>` : ''}
             </div>
             <div class="pending-actions">
@@ -586,7 +628,9 @@ function renderDayCard(day) {
 
 // Show Day Service Detail
 async function showDayServiceDetail(dateISO, service) {
+    const originatingView = currentView;
     await loadBlockedServices(dateISO);
+    if (currentView !== originatingView) return;
     const [y, m, d] = dateISO.split('-').map(Number);
     const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
@@ -713,7 +757,7 @@ function showReservationDetail(r) {
                 <span class="detail-label">Personnes</span>
                 <span class="detail-value">${escapeHtml(r.numberOfPeople)}</span>
             </div>
-            <div class="detail-row"><span class="detail-label">Table</span><span class="detail-value">${escapeHtml(r.table || 'À attribuer')}</span></div>
+            <div class="detail-row"><span class="detail-label">Tables</span><span class="detail-value">${window.FloorPlan.tableLabel(r)}</span></div>
             ${depositRow}
             <div class="detail-row">
                 <span class="detail-label">Téléphone</span>
@@ -734,7 +778,10 @@ function showReservationDetail(r) {
         </div>
 
         ${window.ReservationChanges?.panel(r) || ''}
+        ${clientEmailNotice(r)}
+        ${r.email && ['pending', 'confirmed', 'cancelled'].includes(r.status) ? '<button type="button" class="btn btn-secondary" id="retry-client-email">Renvoyer l\'email au client</button>' : ''}
         ${window.ServiceRelease.financePanel()}
+        ${!['cancelled', 'awaiting-payment'].includes(r.status) ? '<button type="button" class="btn btn-secondary" id="assign-tables-btn">Attribuer / modifier les tables</button>' : ''}
         <div class="detail-actions">
             ${r.status !== 'confirmed' ? `
                 <button class="btn btn-success" onclick="updateStatus('${safeReservationId(r._id)}', 'confirmed'); closeModal();">Confirmer</button>
@@ -750,6 +797,12 @@ function showReservationDetail(r) {
         </div>
     `;
 
+    document.getElementById('assign-tables-btn')?.addEventListener('click', async () => {
+        if (!await window.FloorPlan.canLeave(document.getElementById('staff-floor-plan'))) return;
+        floorPlanTarget = { date: window.FloorPlan.dateOf(r), service: window.FloorPlan.serviceOf(r), reservationId: r._id };
+        closeModal();
+        document.querySelector('[data-view="floor-plan"]').click();
+    });
     window.ReservationChanges?.bind(document.getElementById('modal-body'), r, async (endpoint, options) => {
         const response = await apiFetch(`${API_URL}${endpoint}`, {
             method: options.method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body)
@@ -759,6 +812,20 @@ function showReservationDetail(r) {
         return result;
     }, async () => { closeModal(); await loadReservations(); });
     document.getElementById('reservation-modal').classList.add('active');
+    const retryEmail = document.getElementById('retry-client-email');
+    if (retryEmail) retryEmail.onclick = async () => {
+        if (!confirm('Renvoyer au client un email avec le statut et les horaires actuels ?')) return;
+        retryEmail.disabled = true;
+        try {
+            const response = await apiFetch(`${API_URL}/api/reservations/${safeReservationId(r._id)}/notification/retry`, { method: 'POST' });
+            const result = await response.json();
+            if (!response.ok || !result.success) throw new Error(result.message);
+            alert(result.message);
+            closeModal();
+            await loadReservations();
+        } catch (error) { alert(error.message || 'Email non envoye. La reservation est conservee.'); }
+        finally { retryEmail.disabled = false; }
+    };
 }
 
 // Open Edit Form inside the detail modal
@@ -827,6 +894,10 @@ function openEditForm(id) {
 }
 
 async function submitEdit(id) {
+    if (editInFlight) return;
+    editInFlight = true;
+    const submitButton = document.querySelector('#edit-reservation-form button[type="submit"]');
+    if (submitButton) submitButton.disabled = true;
     const data = {
         customerName: document.getElementById('edit-name').value,
         phoneNumber: document.getElementById('edit-phone').value,
@@ -855,6 +926,9 @@ async function submitEdit(id) {
         loadReservations();
     } catch (error) {
         showToast(error.message || 'Erreur lors de la modification', 'error');
+    } finally {
+        editInFlight = false;
+        if (submitButton) submitButton.disabled = false;
     }
 }
 
@@ -1002,6 +1076,10 @@ function initNewReservationForm() {
 
     document.getElementById('new-reservation-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (createInFlight) return;
+        createInFlight = true;
+        const submitButton = e.currentTarget.querySelector('button[type="submit"]');
+        submitButton.disabled = true;
 
         const data = {
             customerName: document.getElementById('customerName').value,
@@ -1014,15 +1092,23 @@ function initNewReservationForm() {
             source: 'desktop',
             status: 'confirmed'
         };
+        const fingerprint = JSON.stringify(data);
+        if (createFingerprint !== fingerprint || !createRequestKey) {
+            createFingerprint = fingerprint;
+            createRequestKey = crypto.randomUUID();
+        }
 
         try {
             const response = await apiFetch(`${API_URL}/api/reservations/desktop`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'Idempotency-Key': createRequestKey },
                 body: JSON.stringify(data)
             });
 
-            if (!response.ok) throw new Error('Erreur');
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result.success) throw new Error(result.message || 'Erreur lors de la creation');
+            createRequestKey = null;
+            createFingerprint = null;
 
             showToast('Réservation créée', 'success');
             closeNewModal();
@@ -1030,7 +1116,10 @@ function initNewReservationForm() {
             document.getElementById('date').value = getRestaurantDateISO();
             loadReservations();
         } catch (error) {
-            showToast('Erreur lors de la création', 'error');
+            showToast(error.message || 'Erreur lors de la création', 'error');
+        } finally {
+            createInFlight = false;
+            submitButton.disabled = false;
         }
     });
 }

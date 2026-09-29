@@ -1,34 +1,27 @@
 const express = require('express');
 const router = express.Router();
 
-// Configuration du restaurant (pourrait être dans MongoDB)
-let settings = {
-  restaurant: {
-    name: 'Le Bistrot Moderne',
-    address: '123 Rue de la République, 75001 Paris',
-    phone: '+33 1 23 45 67 89',
-    email: 'contact@bistrotmoderne.fr'
-  },
-  hours: {
-    monday: { lunch: null, dinner: null, closed: true },
-    tuesday: { lunch: null, dinner: null, closed: true },
-    wednesday: { lunch: '12:00-14:30', dinner: '19:00-22:30', closed: false },
-    thursday: { lunch: '12:00-14:30', dinner: '19:00-22:30', closed: false },
-    friday: { lunch: '12:00-14:30', dinner: '19:00-23:00', closed: false },
-    saturday: { lunch: '12:00-14:30', dinner: '19:00-23:00', closed: false },
-    sunday: { lunch: '12:00-15:00', dinner: null, closed: false }
-  },
-  capacity: {
-    totalTables: 20,
-    totalSeats: 80,
-    maxGroupSize: 12
-  },
-  bookingRules: {
-    advanceBookingDays: 30,
-    minAdvanceHours: 2,
-    cancellationHours: 24,
-    timeSlotDuration: 15
-  }
+// Read-only compatibility view: operational configuration has one source of truth.
+const { getServiceBounds, CAPACITY } = require('../services/capacityService');
+const minutesToTime = minutes => `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const hours = Object.fromEntries(days.map((name, index) => {
+  const date = '2026-10-' + String(4 + index).padStart(2, '0');
+  const bounds = getServiceBounds(date);
+  const closed = index === 1 || index === 2;
+  return [name, { closed,
+    lunch: closed ? null : minutesToTime(bounds.midiStart) + '-' + minutesToTime(bounds.midiEnd),
+    dinner: closed || index === 0 ? null : minutesToTime(bounds.soirStart) + '-' + minutesToTime(bounds.soirEnd)
+  }];
+}));
+const settings = {
+  restaurant: { name: 'Au Murmure des Flots', address: '44 rue du General Lambert, 97436 Saint-Leu',
+    phone: process.env.RESTAURANT_PHONE || '0262266719' },
+  hours,
+  capacity: { totalSeats: CAPACITY, onlineSeats: Number(process.env.ONLINE_CAPACITY) || 50,
+    maxGroupSize: Number(process.env.ONLINE_BOOKING_LIMIT) || 10, arrivalsPer30Minutes: 20 },
+  bookingRules: { cancellationHours: Number(process.env.DEPOSIT_CANCELLATION_HOURS) || 24, timeSlotDuration: 15 },
+  readOnly: true
 };
 
 // Obtenir les paramètres
@@ -67,52 +60,34 @@ router.get('/hours/:day', (req, res) => {
 // Disponibilité — délègue à capacityService (mêmes règles que POST /api/reservations)
 // DEPRECATED : utiliser GET /api/reservations/availability à la place
 router.post('/availability', async (req, res) => {
-  const { date, time, numberOfPeople } = req.body;
-  if (!date || !time) {
-    return res.json({ success: false, available: false, message: 'Date et heure requises' });
-  }
-  const {
-    checkAvailability,
-    getServiceBounds,
-    isOnlineBookingClosedTime
-  } = require('../services/capacityService');
+  res.set('Cache-Control', 'no-store');
   try {
-    if (isOnlineBookingClosedTime(date, time)) {
-      return res.json({
-        success: false,
-        available: false,
-        message: 'Les reservations en ligne ne sont pas disponibles le dimanche soir, le lundi et le mardi. Merci de choisir un autre creneau.'
-      });
-    }
-    // Vérifier les bornes horaires (mêmes règles que POST /api/reservations)
-    const bounds = getServiceBounds(date);
-    const [h, m] = time.split(':').map(Number);
-    const timeMin = h * 60 + m;
-    const isMidi = timeMin >= bounds.midiStart && timeMin <= bounds.midiEnd;
-    const isSoir = timeMin >= bounds.soirStart && timeMin <= bounds.soirEnd;
-    if (!isMidi && !isSoir) {
-      const midiLimit = bounds.isMidiExtended ? '14h00' : '13h45';
-      const soirLimit = '21h30';
-      return res.json({
-        success: false,
-        available: false,
-        message: `Réservations possibles de 12h00 à ${midiLimit} (midi) ou 18h00 à ${soirLimit} (soir)`
-      });
-    }
-    const result = await checkAvailability(date, time, numberOfPeople || 2, 50);
-    res.json({
-      success: true,
-      available: result.available,
-      message: result.available ? 'Créneau disponible' : result.message || `Créneau complet à ${result.peakSlot} (${result.peakOccupancy}/${result.capacity} couverts)`
-    });
+    const { date, time, numberOfPeople } = req.body;
+    require('../services/capacityService').timeToMinutes(time);
+    const data = await require('../services/availabilityService').getPublicAvailability(date, numberOfPeople ?? 2);
+    const slot = [...data.midi, ...data.soir].find(entry => entry.time === time);
+    res.json({ success: true, available: Boolean(slot?.available),
+      message: slot?.available ? 'Creneau disponible' : 'Creneau indisponible. Merci de choisir un autre horaire.',
+      ...(slot || {}), data });
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    res.status(400).json({ success: false, available: false, message: error.message });
   }
 });
 
 // Mettre à jour les paramètres (protégé par API key)
 const { apiKey } = require('../middleware/auth');
 const { getPaymentReadiness, getPublicDepositPolicy } = require('../services/paymentService');
+const networkSalt = require('crypto').randomBytes(32);
+
+router.get('/network-readiness', apiKey, (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  res.json({ success: true, data: {
+    render: process.env.RENDER === 'true',
+    clientDiffersFromPeer: req.ip !== req.socket.remoteAddress,
+    forwardedHops: req.ips.length,
+    clientFingerprint: require('crypto').createHmac('sha256', networkSalt).update(req.ip || '').digest('hex').slice(0, 24)
+  } });
+});
 
 router.get('/service-rhythm', apiKey, async (req, res) => {
   res.set('Cache-Control', 'private, no-store');
@@ -156,13 +131,9 @@ router.get('/production-readiness', apiKey, async (req, res) => {
   res.json({ success: true, data: { payment, policy: getPublicDepositPolicy(), smtp } });
 });
 
-router.put('/', apiKey, (req, res) => {
-  settings = { ...settings, ...req.body };
-  res.json({
-    success: true,
-    message: 'Paramètres mis à jour',
-    data: settings
-  });
+router.put('/', apiKey, (_req, res) => {
+  res.status(409).json({ success: false,
+    message: 'Configuration en lecture seule. Aucune modification en memoire ne sera appliquee. Utilisez les reglages du serveur et les fermetures de service.' });
 });
 
 module.exports = router;

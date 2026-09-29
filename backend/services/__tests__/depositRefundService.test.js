@@ -14,6 +14,33 @@ const {
 } = require('../depositRefundService');
 
 describe('depositRefundService', () => {
+  test('a Dashboard refund without metadata is matched by its unique PaymentIntent', async () => {
+    const record = await Reservation.findById('reservation-1');
+    Reservation.find.mockReturnValue({ limit: jest.fn().mockResolvedValue([record]) });
+    Reservation.findOneAndUpdate.mockResolvedValue({ ...record, deposit: { ...record.deposit, status: 'refunded' } });
+    const result = await applyRefundEvent({ id: 're_1', payment_intent: 'pi_1', currency: 'eur', metadata: {} });
+    expect(result.deposit.status).toBe('refunded');
+    expect(Reservation.find).toHaveBeenCalledWith({ 'deposit.stripePaymentIntentId': 'pi_1' });
+    expect(retrieveRefund).toHaveBeenCalledWith('re_1');
+  });
+  test('a refund unrelated to restaurant payments is ignored, not retried forever', async () => {
+    Reservation.find.mockReturnValue({ limit: jest.fn().mockResolvedValue([]) });
+    expect(await applyRefundEvent({ id: 're_other', payment_intent: 'pi_other' })).toBeNull();
+    expect(retrieveRefund).not.toHaveBeenCalled();
+  });
+  test('ambiguous PaymentIntent mapping fails closed without modifying either booking', async () => {
+    Reservation.find.mockReturnValue({ limit: jest.fn().mockResolvedValue([{}, {}]) });
+    await expect(applyRefundEvent({ id: 're_1', payment_intent: 'pi_1' })).rejects.toThrow('unique');
+    expect(Reservation.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+  test('refund after POS deduction is marked for manual reconciliation, not silently cleared', async () => {
+    const record = await Reservation.findById('reservation-1'); record.deposit.status = 'deducted';
+    Reservation.findById.mockResolvedValue(record); Reservation.findOneAndUpdate.mockResolvedValue(record);
+    await applyRefundEvent({ id: 're_1', payment_intent: 'pi_1', currency: 'eur', metadata: { reservationId: 'reservation-1' } });
+    const [filter, update] = Reservation.findOneAndUpdate.mock.calls[0];
+    expect(filter['deposit.status']).toBe('deducted'); expect(update.$set['deposit.status']).toBe('refund_review');
+    expect(update.$set['deposit.refundFailureReason']).toContain('caisse');
+  });
   beforeEach(() => {
     jest.resetAllMocks();
     Reservation.findById.mockResolvedValue({ _id: 'reservation-1', deposit: {

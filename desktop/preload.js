@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   openReservations: () => ipcRenderer.invoke('open-reservations'),
   forgetConnection: () => ipcRenderer.invoke('forget-connection'),
   getReservations: (filters = {}) => ipcRenderer.invoke('get-reservations', filters),
-  createReservation: (data) => ipcRenderer.invoke('create-reservation', data),
+  createReservation: (data, requestKey) => ipcRenderer.invoke('create-reservation', data, requestKey),
   updateReservation: (id, data) => ipcRenderer.invoke('update-reservation', { id, data }),
   confirmReservation: (id) => ipcRenderer.invoke('confirm-reservation', id),
   cancelReservation: (id, cancellationInitiator) => ipcRenderer.invoke('cancel-reservation', { id, cancellationInitiator }),

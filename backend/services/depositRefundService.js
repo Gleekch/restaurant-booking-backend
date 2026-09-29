@@ -111,9 +111,13 @@ async function synchronizeRefund(reservationId, refundId) {
     } else {
       reason = 'Action necessaire dans Stripe : ' + refund.status;
     }
+    if (deposit.status === 'deducted') {
+      status = 'refund_review';
+      reason = 'Arrhes deja deduites en caisse : rapprocher le remboursement et le ticket';
+    }
     const version = Number(deposit.refundVersion) || 0;
     const updated = await Reservation.findOneAndUpdate(
-      { _id: reservationId, 'deposit.stripePaymentIntentId': deposit.stripePaymentIntentId,
+      { _id: reservationId, 'deposit.status': deposit.status, 'deposit.stripePaymentIntentId': deposit.stripePaymentIntentId,
         'deposit.stripeRefundId': { $in: [null, refundId] },
         'deposit.refundVersion': version === 0 ? { $in: [null, 0] } : version },
       { $set: {
@@ -134,10 +138,20 @@ async function synchronizeRefund(reservationId, refundId) {
 
 async function applyRefundEvent(refund) {
   const reservationId = refund.metadata && refund.metadata.reservationId;
-  if (!reservationId || !refund.id) return null;
-  const reservation = await Reservation.findById(reservationId);
+  if (!refund.id) return null;
+  let reservation;
+  if (reservationId) {
+    reservation = await Reservation.findById(reservationId);
+  } else {
+    const intent = typeof refund.payment_intent === 'string' ? refund.payment_intent : refund.payment_intent?.id;
+    if (!intent) return null;
+    const matches = await Reservation.find({ 'deposit.stripePaymentIntentId': intent }).limit(2);
+    if (!matches.length) return null;
+    if (matches.length !== 1) throw new Error('Remboursement sans correspondance unique : verification necessaire');
+    reservation = matches[0];
+  }
   if (!reservation || !matchesPayment(refund, reservation)) return null;
-  return synchronizeRefund(reservationId, refund.id);
+  return synchronizeRefund(reservation._id, refund.id);
 }
 
 async function reconcilePendingRefunds(options = {}) {

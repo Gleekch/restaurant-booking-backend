@@ -26,7 +26,8 @@ test('unavailable controls are disabled, explained and cannot self-activate', ()
   expect(window.ServiceRelease.financeEnabled).toBe(false);
   expect(Object.isFrozen(window.ServiceRelease)).toBe(true);
   const panel = window.ServiceRelease.financePanel();
-  expect(panel.match(/ disabled /g)).toHaveLength(3);
+  expect(panel.match(/ disabled /g)).toHaveLength(2);
+  expect(panel).not.toContain('Rembourser');
   expect(panel).toContain('release-finance-note');
   expect(panel).not.toMatch(/onclick|href=/);
   const html = read('desktop/index.html');

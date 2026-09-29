@@ -22,6 +22,10 @@ let currentView = 'today';
 let currentServiceFilter = 'all';
 let serviceDetailState = null;
 let editingReservationId = null;
+let reservationSubmitBusy = false;
+let reservationSubmitKey = null;
+let reservationSubmitFingerprint = null;
+let floorPlanTarget = null;
 let notifiedReservations = new Set();
 
 // Limite couverts en ligne — miroir de ONLINE_CAPACITY côté backend (défaut 50)
@@ -38,6 +42,7 @@ const dateFilter = document.getElementById('date-filter');
 const serviceFilter = document.getElementById('service-filter');
 const reservationsTitle = document.getElementById('reservations-title');
 const weekSection = document.getElementById('week-section');
+const floorPlanSection = document.getElementById('floor-plan-section');
 const monthSection = document.getElementById('month-section');
 const statisticsSection = document.getElementById('statistics-section');
 const clientsSection = document.getElementById('clients-section');
@@ -143,13 +148,14 @@ function formatLongDate(dateValue) {
 }
 
 function hideSections() {
-    [reservationsContainer, clientsSection, weekSection, monthSection,
+    [reservationsContainer, clientsSection, weekSection, monthSection, floorPlanSection,
      statisticsSection, serviceDetailSection, pendingSection].forEach(el => {
         if (el) el.style.display = 'none';
     });
 }
 
-function switchView(view) {
+async function switchView(view) {
+    if (currentView === 'floor-plan' && view !== currentView && !await window.FloorPlan.canLeave(floorPlanSection)) return;
     currentView = view;
     document.querySelectorAll('[data-view]').forEach((link) => {
         link.classList.toggle('active', link.dataset.view === view);
@@ -274,6 +280,22 @@ async function loadReservations() {
 function displayReservations() {
     window.ReservationChanges?.updateQueue(reservations, showReservationDetails);
     hideSections();
+
+    if (currentView === 'floor-plan') {
+        floorPlanSection.style.display = 'block';
+        reservationsTitle.textContent = 'Plan de salle';
+        document.querySelector('.filters').style.display = 'none';
+        window.FloorPlan.mount(floorPlanSection, {
+            date: floorPlanTarget?.date || getSelectedDateValue(),
+            service: floorPlanTarget?.service,
+            reservationId: floorPlanTarget?.reservationId,
+            request: (endpoint, options) => api.apiRequest(endpoint, options),
+            onSaved: () => { loadReservations(); },
+            onOpenReservation: id => { const r = reservations.find(r => r._id === id); if (r) showReservationDetails(r); }
+        });
+        floorPlanTarget = null;
+        return;
+    }
 
     if (currentView === 'service-detail') {
         displayServiceDetail();
@@ -474,7 +496,8 @@ function createReservationCard(reservation) {
         </div>
         <div class="card-name">${escapeHtml(reservation.customerName)}</div>
         ${window.ReservationChanges?.badge(reservation) || ''}
-        <div class="guest-line"><span><strong>${escapeHtml(reservation.numberOfPeople)}</strong> couverts</span><span>${reservation.table ? 'Table ' + escapeHtml(reservation.table) : 'Table à attribuer'}</span></div>
+        ${clientEmailNotice(reservation)}
+        <div class="guest-line"><span><strong>${escapeHtml(reservation.numberOfPeople)}</strong> couverts</span>${window.FloorPlan.tableLabel(reservation)}</div>
         <div class="guest-phone">${escapeHtml(reservation.phoneNumber)}</div>
         <div class="card-deposit">
             ${getDepositText(reservation) ? `<span class="deposit-badge ${escapeHtml(reservation.deposit.status)}">Arrhes ${getDepositText(reservation)}</span>` : ''}
@@ -521,6 +544,12 @@ function getDepositText(reservation) {
     return labels[d.status] || '';
 }
 
+function clientEmailNotice(reservation) {
+    const state = reservation.clientNotification?.state;
+    if (!state || state === 'sent') return '';
+    return `<p class="card-notes" role="status">${state === 'failed' ? 'Email non envoye : contacter le client ou relancer depuis sa fiche.' : 'Email en cours ou a verifier.'}</p>`;
+}
+
 // Afficher les détails de la réservation
 function showReservationDetails(reservation) {
     modal.dataset.reservationId = reservation._id;
@@ -534,22 +563,44 @@ function showReservationDetails(reservation) {
             <div class="detail-field"><span>Date</span>${new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</div>
             <div class="detail-field"><span>Heure</span>${escapeHtml(reservation.time)}</div>
             <div class="detail-field"><span>Couverts</span>${escapeHtml(reservation.numberOfPeople)} personnes</div>
-            <div class="detail-field"><span>Table</span>${escapeHtml(reservation.table || 'À attribuer')}</div>
+            <div class="detail-field"><span>Tables</span>${window.FloorPlan.tableLabel(reservation)}</div>
             <div class="detail-field"><span>Téléphone</span>${escapeHtml(reservation.phoneNumber)}</div>
             <div class="detail-field"><span>Email</span>${escapeHtml(reservation.email || 'Non renseigné')}</div>
         </div>
         ${getDepositText(reservation) ? `<div class="finance-summary"><span>Arrhes · suivi du paiement</span>${getDepositText(reservation)}</div>` : ''}
         ${window.ReservationChanges?.panel(reservation) || ''}
+        ${clientEmailNotice(reservation)}
+        ${reservation.email && ['pending', 'confirmed', 'cancelled'].includes(reservation.status) ? '<button type="button" class="btn btn-secondary" id="retry-client-email">Renvoyer l\'email au client</button>' : ''}
         ${window.ServiceRelease.financePanel(false)}
+        ${!['cancelled', 'awaiting-payment'].includes(reservation.status) ? '<button type="button" class="btn btn-secondary" id="assign-tables-btn">Attribuer / modifier les tables</button>' : ''}
         <p><strong>Source :</strong> ${escapeHtml(reservation.source)}</p>
         ${reservation.specialRequests ? `<div class="guest-note"><strong>Demandes spéciales</strong>${escapeHtml(reservation.specialRequests)}</div>` : ''}
         ${reservation.notes ? `<div class="guest-note"><strong>Notes de service</strong>${escapeHtml(reservation.notes)}</div>` : ''}
     `;
 
+    details.querySelector('#assign-tables-btn')?.addEventListener('click', async () => {
+        if (!await window.FloorPlan.canLeave(floorPlanSection)) return;
+        floorPlanTarget = { date: window.FloorPlan.dateOf(reservation), service: window.FloorPlan.serviceOf(reservation), reservationId: reservation._id };
+        modal.style.display = 'none';
+        switchView('floor-plan');
+    });
     window.ReservationChanges?.bind(details, reservation, (endpoint, options) => api.apiRequest(endpoint, options), async () => {
         modal.style.display = 'none';
         await loadReservations();
     });
+    const retryEmail = details.querySelector('#retry-client-email');
+    if (retryEmail) retryEmail.onclick = async () => {
+        if (!confirm('Renvoyer au client un email avec le statut et les horaires actuels ?')) return;
+        retryEmail.disabled = true;
+        try {
+            const result = await api.apiRequest(`/api/reservations/${encodeURIComponent(reservation._id)}/notification/retry`, { method: 'POST' });
+            if (!result.success) throw new Error(result.message);
+            showNotification('Email', result.message);
+            await loadReservations();
+            showReservationDetails(result.data);
+        } catch (error) { showNotification('Email non envoye', error.message); }
+        finally { retryEmail.disabled = false; }
+    };
     // Configurer les boutons
     const confirmBtn = document.getElementById('confirm-btn');
     const cancelBtn = document.getElementById('cancel-btn');
@@ -666,6 +717,24 @@ async function updateReservationStatus(id, status) {
 }
 
 // Éditer une réservation
+function refreshStaffTimeOptions(date, existingTime = '') {
+    const select = document.getElementById('new-time');
+    const selected = existingTime || select.value;
+    const day = new Date(date + 'T12:00:00Z').getUTCDay();
+    const times = [];
+    if (Number.isFinite(day) && day !== 1 && day !== 2) {
+        const lunchEnd = [0, 5, 6].includes(day) ? 14 * 60 : 13 * 60 + 45;
+        for (let minute = 12 * 60; minute <= lunchEnd; minute += 15) times.push(minute);
+        if (day !== 0) for (let minute = 18 * 60; minute <= 21 * 60 + 30; minute += 15) times.push(minute);
+    }
+    const values = times.map(minute => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`);
+    select.replaceChildren(new Option(times.length ? 'Choisir' : 'Restaurant ferme', ''));
+    for (const value of values) select.add(new Option(value, value));
+    // Keep historical times only for contact-only corrections, not new bookings.
+    if (existingTime && !values.includes(existingTime)) select.add(new Option(existingTime + ' (horaire existant)', existingTime));
+    select.value = selected;
+}
+
 function editReservation(reservation) {
     console.log('Édition de la réservation:', reservation);
     const newReservationModal = document.getElementById('new-reservation-modal');
@@ -678,6 +747,7 @@ function editReservation(reservation) {
 
     document.getElementById('new-name').value = reservation.customerName || '';
     document.getElementById('new-date').value = formatDateInput(new Date(reservation.date));
+    refreshStaffTimeOptions(document.getElementById('new-date').value, reservation.time);
     document.getElementById('new-time').value = reservation.time || '';
     document.getElementById('new-people').value = String(reservation.numberOfPeople || 2);
     document.getElementById('new-phone').value = reservation.phoneNumber || '';
@@ -1398,6 +1468,7 @@ if ('Notification' in window) {
 
 // Initialisation quand le DOM est prêt
 document.addEventListener('DOMContentLoaded', () => {
+    window.FloorPlan.watch(document.body, () => reservations, (endpoint, options) => api.apiRequest(endpoint, options));
     // Gestion de la navigation
     document.querySelectorAll('[data-view]').forEach(link => {
         link.addEventListener('click', (e) => {
@@ -1433,6 +1504,7 @@ document.addEventListener('DOMContentLoaded', () => {
             newReservationModal.style.display = 'block';
             // Définir la date par défaut à aujourd'hui
             document.getElementById('new-date').value = getSelectedDateValue();
+            refreshStaffTimeOptions(document.getElementById('new-date').value);
         });
     }
     
@@ -1458,9 +1530,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Soumettre le formulaire
+    document.getElementById('new-date').addEventListener('change', event => {
+        const existing = reservations.find(r => r._id === editingReservationId);
+        const retained = existing && formatDateInput(new Date(existing.date)) === event.target.value ? existing.time : '';
+        refreshStaffTimeOptions(event.target.value, retained);
+    });
     if (newReservationForm) {
         newReservationForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (reservationSubmitBusy) return;
+            reservationSubmitBusy = true;
+            const submitButton = document.getElementById('submit-reservation-btn');
+            submitButton.disabled = true;
             
             const formData = {
                 customerName: document.getElementById('new-name').value,
@@ -1471,6 +1552,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 email: document.getElementById('new-email').value || '',
                 specialRequests: document.getElementById('new-requests').value || ''
             };
+            const fingerprint = JSON.stringify({ id: editingReservationId, ...formData });
+            if (reservationSubmitFingerprint !== fingerprint || !reservationSubmitKey) {
+                reservationSubmitFingerprint = fingerprint;
+                reservationSubmitKey = crypto.randomUUID();
+            }
             
             try {
                 const result = editingReservationId
@@ -1479,9 +1565,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         ...formData,
                         status: 'confirmed',
                         source: 'desktop'
-                    });
+                    }, reservationSubmitKey);
                 
                 if (result.success) {
+                    reservationSubmitKey = null;
+                    reservationSubmitFingerprint = null;
                     showNotification('Succès', editingReservationId
                         ? 'Réservation modifiée avec succès'
                         : 'Réservation créée avec succès');
@@ -1499,6 +1587,9 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 console.error('Erreur lors de l\'enregistrement de la réservation:', error);
                 alert(`Erreur lors de l'enregistrement de la réservation: ${error.message}`);
+            } finally {
+                reservationSubmitBusy = false;
+                submitButton.disabled = false;
             }
         });
     }

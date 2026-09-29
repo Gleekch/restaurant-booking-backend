@@ -47,6 +47,10 @@ async function apiRequest(endpoint, options = {}) {
     throw new Error('Fonction indisponible dans cette version');
   }
   const headers = buildAuthHeaders();
+  if (options.requestKey) {
+    if (!/^[A-Za-z0-9._:-]{1,120}$/.test(options.requestKey)) throw new Error('Cle de soumission invalide');
+    headers['Idempotency-Key'] = options.requestKey;
+  }
 
   const requestOptions = {
     method: options.method || 'GET',
@@ -326,10 +330,11 @@ ipcMain.handle('get-reservations', async (_event, filters = {}) => {
   return apiRequest(`/api/reservations${query ? `?${query}` : ''}`);
 });
 
-ipcMain.handle('create-reservation', async (_event, data) => {
+ipcMain.handle('create-reservation', async (_event, data, requestKey) => {
   return apiRequest('/api/reservations/desktop', {
     method: 'POST',
-    body: data
+    body: data,
+    requestKey
   });
 });
 

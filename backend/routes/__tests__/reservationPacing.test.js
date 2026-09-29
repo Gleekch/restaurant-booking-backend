@@ -12,7 +12,7 @@ const changes = require('../../services/reservationChangeService');
 const router = require('../reservations');
 const settings = require('../settings');
 const handler = (router, path, method) => router.stack.find(layer => layer.route?.path === path && layer.route.methods[method]).route.stack.at(-1).handle;
-const response = () => ({ status: jest.fn().mockReturnThis(), json: jest.fn() });
+const response = () => ({ set: jest.fn(), status: jest.fn().mockReturnThis(), json: jest.fn() });
 const body = () => ({ customerName: 'TEST', phoneNumber: '0262000000', email: 'fixture@example.invalid',
   date: '2026-09-30', time: '12:15', numberOfPeople: 8 });
 const priorEnabled = process.env.DEPOSIT_ENABLED;
@@ -44,7 +44,8 @@ test.each(['/', '/desktop'])('public and staff creation both enforce rolling pac
 test('the legacy availability endpoint returns the same pacing refusal', async () => {
   const res = response();
   await handler(settings, '/availability', 'post')({ body: body() }, res);
-  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ available: false, message: expect.stringContaining('20 couverts sur 30 minutes') }));
+  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ available: false, message: expect.stringContaining('indisponible') }));
+  expect(res.json.mock.calls[0][0].data.midi.find(slot => slot.time === '12:15').available).toBe(false);
 });
 
 test('the new client request and restaurant acceptance cannot bypass rolling pacing', async () => {

@@ -7,7 +7,11 @@
 const nodemailer = require('nodemailer');
 const Reservation = require('../models/Reservation');
 const { formatAmount } = require('./paymentService');
-const { sendDepositExpiredEmailToClient } = require('./notificationService');
+const { reconcileCheckout } = require('./checkoutReconciliationService');
+const { getRestaurantNow } = require('./capacityService');
+const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, c => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[c]));
 
 // Lien personnel d'annulation en ligne (jeton secret par réservation)
 function buildCancelUrl(reservation) {
@@ -24,13 +28,17 @@ const emailTransporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
   },
-  tls: { rejectUnauthorized: false },
+  tls: { rejectUnauthorized: true },
+  requireTLS: process.env.NODE_ENV !== 'test',
+  disableFileAccess: true,
+  disableUrlAccess: true,
   connectionTimeout: 10000,
   greetingTimeout: 10000,
   socketTimeout: 15000
 });
 
 async function sendReminderEmail(reservation) {
+  if (reservation.status !== 'confirmed') return false;
   if (!reservation.email) return false;
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) return false;
 
@@ -52,7 +60,7 @@ async function sendReminderEmail(reservation) {
           </div>
           <div style="padding:30px;">
             <p style="color:#1c1917; font-size:16px; margin-bottom:20px;">
-              Bonjour ${reservation.customerName},
+              Bonjour ${escapeHtml(reservation.customerName)},
             </p>
             <p style="color:#78716c; font-size:15px; line-height:1.6;">
               Nous vous rappelons votre réservation demain :
@@ -62,7 +70,7 @@ async function sendReminderEmail(reservation) {
               <p style="margin:0 0 8px; color:#1c1917; font-size:15px;">Heure : <strong>${reservation.time}</strong></p>
               <p style="margin:0 0 8px; color:#1c1917; font-size:15px;">Personnes : <strong>${reservation.numberOfPeople}</strong></p>
               ${reservation.deposit && reservation.deposit.status === 'paid' ? `<p style="margin:0 0 8px; color:#166534; font-size:14px;">Arrhes payées : <strong>${formatAmount(reservation.deposit.amountCents, reservation.deposit.currency)}</strong> (déduites de l'addition)</p>` : ''}
-              ${reservation.specialRequests ? `<p style="margin:0; color:#78716c; font-size:14px; font-style:italic;">${reservation.specialRequests}</p>` : ''}
+              ${reservation.specialRequests ? `<p style="margin:0; color:#78716c; font-size:14px; font-style:italic;">${escapeHtml(reservation.specialRequests)}</p>` : ''}
             </div>
             <p style="color:#78716c; font-size:14px; line-height:1.6;">
               Si vous souhaitez modifier ou annuler, contactez-nous au
@@ -93,18 +101,16 @@ async function sendReminderEmail(reservation) {
  * Idempotent : ne renvoie pas si reminder24hSentAt est déjà set
  */
 async function processReminders() {
-  const now = new Date();
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(getRestaurantNow().date + 'T00:00:00Z');
+  tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
 
   const dayAfter = new Date(tomorrow);
-  dayAfter.setDate(dayAfter.getDate() + 1);
+  dayAfter.setUTCDate(dayAfter.getUTCDate() + 1);
 
   // Trouver les réservations de demain, confirmées, pas encore rappelées
   const reservations = await Reservation.find({
     date: { $gte: tomorrow, $lt: dayAfter },
-    status: { $in: ['confirmed', 'pending'] },
+    status: 'confirmed',
     reminder24hSentAt: null,
     email: { $exists: true, $ne: '' }
   });
@@ -114,10 +120,15 @@ async function processReminders() {
 
   for (const reservation of reservations) {
     try {
-      const success = await sendReminderEmail(reservation);
+      const fresh = await Reservation.findById(reservation._id);
+      if (!fresh || fresh.status !== 'confirmed' || fresh.reminder24hSentAt
+        || new Date(fresh.date).getTime() !== new Date(reservation.date).getTime()
+        || fresh.time !== reservation.time || fresh.email !== reservation.email) continue;
+      const success = await sendReminderEmail(fresh);
       if (success) {
-        reservation.reminder24hSentAt = new Date();
-        await reservation.save();
+        await Reservation.findOneAndUpdate({ _id: fresh._id, status: 'confirmed', date: fresh.date,
+          time: fresh.time, numberOfPeople: fresh.numberOfPeople, reminder24hSentAt: null },
+        { $set: { reminder24hSentAt: new Date() } });
         sent++;
         console.log(`Rappel envoyé à ${reservation.email} pour ${reservation.customerName}`);
       }
@@ -132,59 +143,33 @@ async function processReminders() {
 }
 
 /**
- * Filet de sécurité : annule les réservations restées en attente de paiement
- * dont le délai d'acompte est dépassé (si un webhook Stripe a été manqué).
+ * Reconcile expired local holds with Stripe before changing their state.
+ * A timeout or an unavailable provider never counts as proof of non-payment.
  * @param {object} io - instance Socket.IO (optionnelle) pour notifier le dashboard
  */
 async function sweepExpiredDeposits(io) {
   const now = new Date();
-
-  // Cas 1 : réservations en attente de paiement (flux normal) → annuler
-  const staleAwaitingPayment = await Reservation.find({
-    status: 'awaiting-payment',
-    'deposit.expiresAt': { $ne: null, $lt: now }
-  });
-
-  let cancelled = 0;
-  for (const reservation of staleAwaitingPayment) {
-    try {
-      reservation.status = 'cancelled';
-      reservation.deposit.status = 'failed';
-      await reservation.save();
-      if (io) io.emit('cancel-reservation', reservation);
-      if (reservation.email) {
-        sendDepositExpiredEmailToClient(reservation).catch(err =>
-          console.error(`Erreur email expiration acompte (${reservation._id}):`, err.message)
-        );
-      }
-      cancelled++;
-    } catch (error) {
-      console.error(`Erreur annulation acompte expiré (${reservation._id}):`, error.message);
-    }
-  }
-
-  // Cas 2 : lien admin expiré sur une résa existante → remettre deposit.failed sans annuler
-  const staleAdminRequest = await Reservation.find({
-    status: { $in: ['pending', 'confirmed'] },
+  const candidates = await Reservation.find({
+    status: { $in: ['awaiting-payment', 'pending', 'confirmed', 'cancelled'] },
     'deposit.status': 'awaiting',
     'deposit.expiresAt': { $ne: null, $lt: now }
-  });
-
+  }).sort({ 'deposit.checkoutCheckedAt': 1 }).limit(100);
+  let cancelled = 0;
   let resetDeposits = 0;
-  for (const reservation of staleAdminRequest) {
+  let errors = 0;
+  for (const reservation of candidates) {
     try {
-      reservation.deposit.status = 'failed';
-      await reservation.save();
-      if (io) io.emit('update-reservation', reservation);
-      resetDeposits++;
+      const result = await reconcileCheckout(reservation, io);
+      if (result.reservation?.deposit?.status === 'failed') {
+        if (result.reservation.status === 'cancelled') cancelled++;
+        else resetDeposits++;
+      }
     } catch (error) {
-      console.error(`Erreur reset lien arrhes expiré (${reservation._id}):`, error.message);
+      errors++;
+      console.error(`Verification paiement expire (${reservation._id}):`, error.message);
     }
   }
-
-  if (cancelled > 0) console.log(`Acomptes expirés: ${cancelled} réservation(s) annulée(s)`);
-  if (resetDeposits > 0) console.log(`Liens arrhes admin expirés: ${resetDeposits} remis à zéro`);
-  return { cancelled, resetDeposits };
+  return { cancelled, resetDeposits, errors, scanned: candidates.length };
 }
 
 /**
@@ -234,21 +219,28 @@ function startReminderScheduler(io) {
   console.log('Scheduler de rappels démarré (vérification toutes les heures)');
 
   let hourCount = 0;
-  const tick = () => {
-    processReminders().catch(err => console.error('Erreur scheduler rappels:', err.message));
-    sweepExpiredDeposits(io).catch(err => console.error('Erreur balayage acomptes:', err.message));
-    // Anonymisation RGPD une fois par jour (au démarrage puis toutes les 24 itérations)
-    if (hourCount % 24 === 0) {
-      anonymizeOldReservations().catch(err => console.error('Erreur anonymisation RGPD:', err.message));
-    }
-    hourCount++;
+  let running = false;
+  const tick = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await processReminders().catch(err => console.error('Erreur scheduler rappels:', err.message));
+      await sweepExpiredDeposits(io).catch(err => console.error('Erreur balayage acomptes:', err.message));
+      // Anonymisation RGPD une fois par jour (au démarrage puis toutes les 24 itérations)
+      if (hourCount % 24 === 0) {
+        await anonymizeOldReservations().catch(err => console.error('Erreur anonymisation RGPD:', err.message));
+      }
+      hourCount++;
+    } finally { running = false; }
   };
 
   // Vérifier immédiatement au démarrage
   tick();
 
   // Puis toutes les heures
-  setInterval(tick, 60 * 60 * 1000); // 1 heure
+  const timer = setInterval(tick, 60 * 60 * 1000);
+  timer.unref?.();
+  return timer;
 }
 
 module.exports = { processReminders, sweepExpiredDeposits, anonymizeOldReservations, startReminderScheduler };

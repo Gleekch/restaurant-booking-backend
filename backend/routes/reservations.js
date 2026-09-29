@@ -4,6 +4,11 @@ const crypto = require('crypto');
 
 const router = express.Router();
 
+const cancelReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 120,
+  message: { success: false, message: 'Trop de consultations, reessayez dans quelques minutes' }
+});
 const cancelLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
@@ -42,7 +47,7 @@ router.use(require('./reservationChanges'));
 const RESTAURANT_TIME_ZONE = process.env.RESTAURANT_TIME_ZONE || 'Indian/Reunion';
 
 function getBookingRequestKey(req) {
-  const key = String(req.get('Idempotency-Key') || '').trim();
+  const key = String(req.get?.('Idempotency-Key') || '').trim();
   if (!key) return null;
   if (key.length > 120 || !/^[A-Za-z0-9._:-]+$/.test(key)) {
     throw new Error('Cle de soumission invalide');
@@ -232,6 +237,10 @@ function validatePublicReservationPayload(payload) {
 async function createReservation(req, res, options = {}) {
   const { notify = true, limit = CAPACITY } = options;
   const reservation = await withBookingTransaction([req.body.date], async session => {
+    if (options.replay) {
+      const replay = await options.replay(session);
+      if (replay) { req.bookingReplayed = true; return replay; }
+    }
     const availability = await checkAvailability(req.body.date, req.body.time, req.body.numberOfPeople, limit, null, session);
     if (!availability.available) throw new Error(availability.message || 'Ce creneau vient de se remplir. Merci de choisir un autre horaire.');
     const created = new Reservation(req.body);
@@ -239,10 +248,10 @@ async function createReservation(req, res, options = {}) {
     return created;
   });
 
-  if (notify) {
+  if (notify && !req.bookingReplayed) {
     try {
       await sendNotifications(reservation);
-      console.log('Notifications envoyees avec succes');
+      console.log('Traitement des notifications termine; consulter leur statut d envoi');
     } catch (notificationError) {
       console.error('Erreur envoi notifications:', notificationError);
     }
@@ -260,6 +269,25 @@ router.post('/desktop', apiKey, async (req, res) => {
     req.body = reservationInput(req.body, true);
     req.body.source = req.body.source || 'desktop';
     if (req.body.status === 'cancelled') throw new Error('Une nouvelle reservation doit etre active.');
+    const requestKey = getBookingRequestKey(req);
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify(
+      Object.fromEntries(Object.keys(req.body).sort().map(key => [key, req.body[key]]))
+    )).digest('hex');
+    req.body.bookingRequestFingerprint = 'staff:' + fingerprint;
+    if (requestKey) req.body.bookingRequestKey = 'staff:' + requestKey;
+    const replayFilter = requestKey ? { bookingRequestKey: req.body.bookingRequestKey }
+      : { bookingRequestFingerprint: req.body.bookingRequestFingerprint,
+        createdAt: { $gte: new Date(Date.now() - 120000) }, status: { $ne: 'cancelled' } };
+    const findReplay = async session => {
+      const query = Reservation.findOne(replayFilter);
+      const prior = await (session ? query.session(session) : query);
+      if (prior && prior.bookingRequestFingerprint !== req.body.bookingRequestFingerprint) {
+        throw new Error('Cette cle de soumission a deja ete utilisee avec une autre reservation.');
+      }
+      return prior;
+    };
+    const prior = await findReplay();
+    if (prior) return res.json({ success: true, duplicate: true, data: prior, message: 'Reservation deja enregistree' });
     const { date, time, numberOfPeople } = req.body;
     const requestedPeople = getPartySize(numberOfPeople);
     const availability = await checkAvailability(date, time, requestedPeople, CAPACITY);
@@ -272,10 +300,11 @@ router.post('/desktop', apiKey, async (req, res) => {
       });
     }
 
-    const reservation = await createReservation(req, res);
+    const reservation = await createReservation(req, res, { replay: findReplay });
 
-    res.status(201).json({
+    res.status(req.bookingReplayed ? 200 : 201).json({
       success: true,
+      duplicate: Boolean(req.bookingReplayed),
       message: 'Reservation creee avec succes',
       data: reservation
     });
@@ -467,72 +496,10 @@ router.post('/', async (req, res) => {
 router.get('/availability', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
-    const { date, people } = req.query;
-
-    if (!date) {
-      return res.status(400).json({
-        success: false,
-        message: 'Parametre date requis'
-      });
-    }
-
-    const { getAvailableSlots } = require('../services/capacityService');
-    const { getEnrichedAvailability, getConfig } = require('../services/slotStrategyService');
-    const requestedPeople = getPartySize(people || 2);
-
-    if (isOnlineBookingClosedDate(date)) {
-      return res.status(400).json({
-        success: false,
-        message: buildClosedDaysMessage()
-      });
-    }
-
-    if (requestedPeople > ONLINE_BOOKING_LIMIT) {
-      return res.status(400).json({
-        success: false,
-        message: `Pour les groupes de plus de ${ONLINE_BOOKING_LIMIT} personnes, merci d'appeler le restaurant au ${RESTAURANT_PHONE_DISPLAY}.`
-      });
-    }
-
-    // Vérifier les blocages manuels
-    const BlockedService = require('../models/BlockedService');
-    const { year, month, day } = parseDateInput(date);
-    const dayStart = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
-    const dayEnd   = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
-    const blocked = await BlockedService.find({ date: { $gte: dayStart, $lte: dayEnd } });
-    const blockedServices = blocked.map(b => b.service);
-
-    const baseSlots = await getAvailableSlots(date, requestedPeople, ONLINE_CAPACITY_LIMIT);
-
-    // Marquer les créneaux bloqués comme indisponibles
-    if (blockedServices.includes('all') || blockedServices.includes('midi')) {
-      baseSlots.midi = baseSlots.midi.map(s => ({ ...s, available: false }));
-    }
-    if (blockedServices.includes('all') || blockedServices.includes('soir')) {
-      baseSlots.soir = baseSlots.soir.map(s => ({ ...s, available: false }));
-    }
-
-    const hasFullSlots = [...baseSlots.midi, ...baseSlots.soir].some(s => !s.available);
-    const notice = hasFullSlots ? ONLINE_LIMIT_NOTICE : null;
-    const meta = { recommendationsEnabled: false, notice, blockedServices };
-
-    if (!getConfig().recommendationsEnabled) {
-      return res.json({ success: true, data: { ...baseSlots, meta } });
-    }
-
-    try {
-      const enriched = await getEnrichedAvailability(date, requestedPeople, baseSlots);
-      enriched.meta = { ...enriched.meta, notice, blockedServices };
-      return res.json({ success: true, data: enriched });
-    } catch (enrichError) {
-      console.error('slotStrategyService fallback:', enrichError.message);
-      return res.json({ success: true, data: { ...baseSlots, meta } });
-    }
+    const data = await require('../services/availabilityService').getPublicAvailability(req.query.date, req.query.people || 2);
+    res.json({ success: true, data });
   } catch (error) {
-    res.status(400).json({
-      success: false,
-      message: error.message
-    });
+    res.status(400).json({ success: false, message: error.message });
   }
 });
 
@@ -617,7 +584,7 @@ router.put('/:id', apiKey, async (req, res) => {
     if (req.body.status === 'cancelled') {
       const result = await cancelReservationCore(existing._id);
       if (result.changed && result.reservation.email) {
-        sendCancellationEmailToClient(result.reservation).catch(err =>
+        await sendCancellationEmailToClient(result.reservation).catch(err =>
           console.error('Erreur email annulation client:', err.message)
         );
       }
@@ -710,10 +677,14 @@ router.put('/:id', apiKey, async (req, res) => {
     const statusChangedToConfirmed = req.body.status === 'confirmed' && existing.status !== 'confirmed';
     const restoredFromCancelled = existing.status === 'cancelled' && (req.body.status === 'pending' || req.body.status === 'confirmed');
 
-    if ((statusChangedToConfirmed || (restoredFromCancelled && req.body.status === 'confirmed')) && reservation.email) {
-      sendConfirmationEmailToClient(reservation).catch(err =>
+    if ((statusChangedToConfirmed || (restoredFromCancelled && req.body.status === 'confirmed')
+      || ((dateChanged || timeChanged || peopleChanged) && reservation.status === 'confirmed')) && reservation.email) {
+      await sendConfirmationEmailToClient(reservation).catch(err =>
         console.error('Erreur email confirmation client:', err.message)
       );
+    } else if ((dateChanged || timeChanged || peopleChanged) && reservation.status === 'pending' && reservation.email) {
+      await require('../services/notificationService').sendPendingEmailToClient(reservation).catch(err =>
+        console.error('Erreur email mise a jour client:', err.message));
     }
 
     const io = req.app.get('io');
@@ -815,7 +786,7 @@ router.delete('/:id', apiKey, async (req, res) => {
     const { reservation, refundMessage } = result;
 
     if (result.changed && reservation.email) {
-      sendCancellationEmailToClient(reservation).catch(err =>
+      await sendCancellationEmailToClient(reservation).catch(err =>
         console.error('Erreur email annulation client:', err.message)
       );
     }
@@ -839,7 +810,7 @@ router.delete('/:id', apiKey, async (req, res) => {
 });
 
 // Résumé public d'une réservation (page d'annulation client), protégé par le jeton.
-router.get('/:id/public', cancelLimiter, async (req, res) => {
+router.get('/:id/public', cancelReadLimiter, async (req, res) => {
   try {
     res.set('Cache-Control', 'private, no-store');
     const { token } = req.query;
@@ -899,7 +870,7 @@ router.post('/:id/cancel', cancelLimiter, async (req, res) => {
     const { refundMessage, refunded } = result;
 
     if (result.changed && result.reservation.email) {
-      sendCancellationEmailToClient(result.reservation).catch(err =>
+      await sendCancellationEmailToClient(result.reservation).catch(err =>
         console.error('Erreur email annulation client:', err.message)
       );
     }
@@ -918,6 +889,26 @@ router.post('/:id/cancel', cancelLimiter, async (req, res) => {
 });
 
 // Remboursement manuel des arrhes (override staff)
+router.post('/:id/notification/retry', apiKey, async (req, res) => {
+  try {
+    const reservation = await Reservation.findById(req.params.id);
+    if (!reservation) return res.status(404).json({ success: false, message: 'Reservation introuvable' });
+    if (!reservation.email || !['pending', 'confirmed', 'cancelled'].includes(reservation.status)) {
+      return res.status(400).json({ success: false, message: 'Aucun email client a renvoyer pour ce statut.' });
+    }
+    const notifications = require('../services/notificationService');
+    const send = { pending: notifications.sendPendingEmailToClient,
+      confirmed: notifications.sendConfirmationEmailToClient, cancelled: notifications.sendCancellationEmailToClient }[reservation.status];
+    let result;
+    try { result = await send(reservation, { force: true }); }
+    finally { req.app.get('io')?.emit('update-reservation', reservation); }
+    if (result?.skipped) return res.status(409).json({ success: false, message: 'Envoi deja en cours ou reservation modifiee. Rechargez la fiche.' });
+    res.json({ success: true, message: 'Email transmis au serveur de messagerie.', data: reservation });
+  } catch (error) {
+    res.status(503).json({ success: false, message: 'Email non envoye. La reservation est conservee. Contactez le client par telephone.' });
+  }
+});
+
 router.post('/:id/deposit/refund', apiKey, async (req, res) => {
   try {
     const result = await refundReservationSafely(req.params.id);

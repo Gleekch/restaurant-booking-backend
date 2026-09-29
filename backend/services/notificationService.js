@@ -88,7 +88,8 @@ async function sendNotifications(reservation) {
   
   // Email d'accusé de réception au client (en attente de confirmation)
   if (reservation.email) {
-    emailPromises.push(sendPendingEmailToClient(reservation));
+    emailPromises.push(reservation.status === 'confirmed'
+      ? sendConfirmationEmailToClient(reservation) : sendPendingEmailToClient(reservation));
   }
   
   try {
@@ -238,7 +239,10 @@ async function sendEmail(message, reservation) {
 }
 
 // Email accusé de réception — en attente de confirmation du personnel
-async function sendPendingEmailToClient(reservation) {
+async function sendPendingEmailToClient(reservation, options) {
+  return require('./clientNotificationService').deliver(reservation, 'pending', () => pendingEmail(reservation), options);
+}
+async function pendingEmail(reservation) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !reservation.email) return;
 
   const dateStr = new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -305,7 +309,10 @@ async function sendPendingEmailToClient(reservation) {
 }
 
 // Email de confirmation — envoyé quand le personnel valide la réservation
-async function sendConfirmationEmailToClient(reservation) {
+async function sendConfirmationEmailToClient(reservation, options) {
+  return require('./clientNotificationService').deliver(reservation, 'confirmed', () => confirmationEmail(reservation), options);
+}
+async function confirmationEmail(reservation) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !reservation.email) return;
   const clientEmail = reservation.email;
   console.log(`Tentative d'envoi d'email de confirmation au client: ${clientEmail}`);
@@ -411,7 +418,10 @@ async function sendConfirmationEmailToClient(reservation) {
 }
 
 // Email d'annulation — envoyé quand le personnel annule la réservation
-async function sendCancellationEmailToClient(reservation) {
+async function sendCancellationEmailToClient(reservation, options) {
+  return require('./clientNotificationService').deliver(reservation, 'cancelled', () => cancellationEmail(reservation), options);
+}
+async function cancellationEmail(reservation) {
   if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS || !reservation.email) return;
 
   const dateStr = new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });

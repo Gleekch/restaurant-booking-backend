@@ -172,9 +172,18 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId, s
 
   const effectiveLimit = Math.min(limit || CAPACITY, CAPACITY);
   const startMin = timeToMinutes(time);
+  const bounds = getServiceBounds(date);
+  if (isOnlineBookingClosedTime(date, time)) {
+    return { available: false, reason: 'closed',
+      message: 'Restaurant ferme le dimanche soir, le lundi et le mardi. Choisissez un autre creneau.' };
+  }
   if (startMin > getServiceBounds(date).soirEnd) {
     return { available: false, reason: 'after-last-arrival',
       message: 'Derniere arrivee a 21h30 pour tous les services du soir, samedi compris.' };
+  }
+  if (!((startMin >= bounds.midiStart && startMin <= bounds.midiEnd)
+    || (startMin >= bounds.soirStart && startMin <= bounds.soirEnd))) {
+    return { available: false, reason: 'outside-service', message: 'Cet horaire est en dehors des services du restaurant.' };
   }
   const { occupancy, arrivals, arrivalMinutes } = await getOccupancyMap(date, excludeId, session);
 
@@ -259,7 +268,8 @@ async function getAvailableSlots(date, numberOfPeople, limit, excludeId) {
   }
 
   function checkSlot(startMin, duration) {
-    if (isToday && startMin < currentMinutes - 15) {
+    if (date < restaurantNow.date || isOnlineBookingClosedTime(date, formatTime(startMin))
+      || (isToday && startMin < currentMinutes)) {
       return false;
     }
 

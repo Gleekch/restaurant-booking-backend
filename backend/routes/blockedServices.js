@@ -10,7 +10,10 @@ const emailTransporter = nodemailer.createTransport({
   port: parseInt(process.env.EMAIL_PORT) || 465,
   secure: (parseInt(process.env.EMAIL_PORT) || 465) === 465,
   auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-  tls: { rejectUnauthorized: false }
+  tls: { rejectUnauthorized: true },
+  requireTLS: process.env.NODE_ENV !== 'test',
+  connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
+  disableFileAccess: true, disableUrlAccess: true
 });
 
 async function sendBlockNotification(date, service) {
