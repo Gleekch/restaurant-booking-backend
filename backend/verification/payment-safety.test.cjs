@@ -340,6 +340,43 @@ test('legacy booking without deposit remains cancellable', async () => {
   assert.equal(h.refunds(), 0);
 });
 
+test('cancellation re-reads a concurrent earlier date before deciding a refund', async () => {
+  const h = cancellationHarness(48);
+  h.model.beforeUpdate = state => {
+    state.date = '2026-10-02T00:00:00.000Z'; state.time = '19:00';
+    state.cancellationReference = { date: state.date, time: state.time, numberOfPeople: 6 };
+  };
+  await h.module.auditCancel(id);
+  assert.equal(h.state().status, 'cancelled');
+  assert.equal(h.state().deposit.status, 'paid');
+  assert.equal(h.refunds(), 0);
+});
+
+test('cancellation also protects a time-only concurrent edit', async () => {
+  const h = cancellationHarness(23.5, { initial: { ...paidRecord(), status: 'confirmed', time: '13:00' } });
+  h.model.beforeUpdate = state => { state.time = '12:00'; };
+  await h.module.auditCancel(id);
+  assert.equal(h.refunds(), 0);
+});
+
+test('a concurrently accepted postponement recalculates eligibility using the new date', async () => {
+  const h = cancellationHarness(1);
+  h.model.beforeUpdate = state => { state.date = '2026-10-07T00:00:00.000Z'; };
+  await h.module.auditCancel(id);
+  assert.equal(h.state().date, '2026-10-07T00:00:00.000Z');
+  assert.equal(h.state().deposit.status, 'refund_pending');
+  assert.equal(h.refunds(), 1);
+});
+
+test('legacy earlier refund reference never overrides the accepted date policy', async () => {
+  const h = cancellationHarness(48);
+  h.model.beforeUpdate = state => {
+    state.cancellationReference = { date: '2026-10-02T00:00:00.000Z', time: '19:00', numberOfPeople: 6 };
+  };
+  await h.module.auditCancel(id);
+  assert.equal(h.refunds(), 1);
+});
+
 test('late payment for an expired cancelled Checkout is refunded, never reactivated', async () => {
   let count = 0;
   const initial = record({ status: 'cancelled' }); initial.deposit.status = 'failed';

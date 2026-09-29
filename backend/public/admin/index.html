@@ -65,7 +65,10 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modal-title">Détails</h2>
-                <button class="close-btn" onclick="closeModal()">&times;</button>
+                <div class="modal-header-actions">
+                    <button type="button" id="edit-reservation-btn" class="btn btn-primary" hidden>Modifier</button>
+                    <button type="button" class="close-btn" onclick="closeModal()" aria-label="Fermer la fiche">&times;</button>
+                </div>
             </div>
             <div class="modal-body" id="modal-body"></div>
         </div>
@@ -119,6 +122,8 @@
     <script src="config.js"></script>
     <script src="release-controls.js"></script>
     <script src="service-ui.js"></script>
+    <script src="reservation-changes.js"></script>
+    <script src="service-rhythm.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

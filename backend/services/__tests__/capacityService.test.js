@@ -1,6 +1,6 @@
 jest.mock('../../models/Reservation', () => ({ find: jest.fn() }));
 const Reservation = require('../../models/Reservation');
-const { checkAvailability, getAvailableSlots, parseDateInput, CAPACITY } = require('../capacityService');
+const { checkAvailability, getAvailableSlots, parseDateInput, getServiceBounds, CAPACITY } = require('../capacityService');
 
 beforeEach(() => jest.clearAllMocks());
 test('off-grid staff bookings occupy real time, not a different grid', async () => {
@@ -20,4 +20,57 @@ test.each(['2026-02-30', '2026-13-01', '2026-00-01'])('rejects impossible date %
 });
 test.each([1.5, '2people', -1, 0])('rejects invalid party size %s', async value => {
   await expect(checkAvailability('2026-10-07', '19:00', value)).rejects.toThrow();
+});
+
+test.each([50, CAPACITY])('30-minute ceiling also applies to capacity limit %s', async limit => {
+  Reservation.find.mockResolvedValue([{ time: '12:00', numberOfPeople: 12 }, { time: '12:15', numberOfPeople: 1 }]);
+  const result = await checkAvailability('2026-09-30', '12:15', 8, limit);
+  expect(result).toEqual(expect.objectContaining({ available: false, reason: 'arrival-window-full', peakOccupancy: 21, capacity: 20 }));
+});
+
+test.each(['12:01', '12:15', '12:29'])('counts nearby arrivals on both sides of %s', async time => {
+  Reservation.find.mockResolvedValue([{ time: '12:00', numberOfPeople: 6 }, { time: '12:29', numberOfPeople: 8 }]);
+  expect((await checkAvailability('2026-09-30', time, 7, CAPACITY)).available).toBe(false);
+});
+
+test('exactly 30 minutes apart are separate half-open windows', async () => {
+  Reservation.find.mockResolvedValue([{ time: '12:00', numberOfPeople: 20 }]);
+  expect((await checkAvailability('2026-09-30', '12:29', 1, CAPACITY)).available).toBe(false);
+  expect((await checkAvailability('2026-09-30', '12:30', 20, CAPACITY)).available).toBe(true);
+});
+
+test('allows exactly 20, rejects 21 and a single party over the pacing ceiling', async () => {
+  Reservation.find.mockResolvedValue([{ time: '19:05', numberOfPeople: 12 }]);
+  expect((await checkAvailability('2026-09-30', '19:30', 8, CAPACITY)).available).toBe(true);
+  expect((await checkAvailability('2026-09-30', '19:30', 9, CAPACITY)).available).toBe(false);
+  Reservation.find.mockResolvedValue([]);
+  expect((await checkAvailability('2026-09-30', '19:00', 21, CAPACITY)).available).toBe(false);
+});
+
+test('online slots and saving accept exactly 20 arrivals but refuse 21 across adjacent slots', async () => {
+  Reservation.find.mockResolvedValue([{ time: '12:00', numberOfPeople: 12 }]);
+  for (const [people, available] of [[8, true], [9, false]]) {
+    expect((await getAvailableSlots('2026-09-30', people, 50)).midi.find(s => s.time === '12:15').available).toBe(available);
+    expect((await checkAvailability('2026-09-30', '12:15', people, 50)).available).toBe(available);
+  }
+});
+
+test('availability and save agree on 30-minute pressure and exclude the edited booking', async () => {
+  const id = '000000000000000000000023';
+  const records = [{ time: '12:00', numberOfPeople: 17 }, { time: '12:15', numberOfPeople: 9 }];
+  Reservation.find.mockResolvedValue(records);
+  expect((await getAvailableSlots('2026-09-30', 8, 50, id)).midi.find(s => s.time === '12:15').available).toBe(false);
+  expect(Reservation.find).toHaveBeenCalledWith(expect.objectContaining({ _id: { $ne: id } }));
+  expect((await checkAvailability('2026-09-30', '12:15', 8, 50, id)).available).toBe(false);
+});
+
+test('Wednesday and Thursday include 13:45; weekend hours and Sunday evening closure stay intact', async () => {
+  Reservation.find.mockResolvedValue([]);
+  for (const date of ['2026-09-30', '2026-10-01']) {
+    expect(getServiceBounds(date).midiEnd).toBe(825);
+    expect((await getAvailableSlots(date, 2, 50)).midi.at(-1)).toEqual({ time: '13:45', available: true });
+  }
+  expect(getServiceBounds('2026-10-02').midiEnd).toBe(840);
+  expect(getServiceBounds('2026-10-03').soirEnd).toBe(1320);
+  expect((await getAvailableSlots('2026-10-04', 2, 50)).soir).toEqual([]);
 });

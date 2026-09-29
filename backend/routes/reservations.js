@@ -35,6 +35,9 @@ const {
 } = require('../services/paymentService');
 const { refundReservationSafely } = require('../services/depositRefundService');
 const { toPublicReservationData } = require('../services/publicReservationService');
+const reservationChanges = require('../services/reservationChangeService');
+
+router.use(require('./reservationChanges'));
 
 const RESTAURANT_TIME_ZONE = process.env.RESTAURANT_TIME_ZONE || 'Indian/Reunion';
 
@@ -118,7 +121,8 @@ function getReservationStartUtcMs(reservation) {
 }
 
 function hoursUntilReservation(reservation) {
-  return (getReservationStartUtcMs(reservation) - Date.now()) / (60 * 60 * 1000);
+  const start = getReservationStartUtcMs(reservation);
+  return (start - Date.now()) / (60 * 60 * 1000);
 }
 
 const ONLINE_BOOKING_LIMIT = parseInt(process.env.ONLINE_BOOKING_LIMIT, 10) || 10;
@@ -155,7 +159,7 @@ function getServiceName(timeInMinutes) {
 }
 
 function buildServiceHoursMessage(bounds) {
-  const midiLimit = bounds.isMidiExtended ? '14h00' : '13h30';
+  const midiLimit = bounds.isMidiExtended ? '14h00' : '13h45';
   const soirLimit = bounds.isSoirWeekend ? '22h00' : '21h30';
 
   return `Les reservations sont possibles de 12h00 a ${midiLimit} (midi) ou de 18h00 a ${soirLimit} (soir)`;
@@ -229,7 +233,7 @@ async function createReservation(req, res, options = {}) {
   const { notify = true, limit = CAPACITY } = options;
   const reservation = await withBookingTransaction([req.body.date], async session => {
     const availability = await checkAvailability(req.body.date, req.body.time, req.body.numberOfPeople, limit, null, session);
-    if (!availability.available) throw new Error('Ce creneau vient de se remplir. Merci de choisir un autre horaire.');
+    if (!availability.available) throw new Error(availability.message || 'Ce creneau vient de se remplir. Merci de choisir un autre horaire.');
     const created = new Reservation(req.body);
     await created.save({ session });
     return created;
@@ -264,7 +268,7 @@ router.post('/desktop', apiKey, async (req, res) => {
       const serviceName = getServiceName(timeToMinutes(time));
       return res.status(400).json({
         success: false,
-        message: `Desole, le service du ${serviceName} est complet a ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts).`
+        message: availability.message || `Desole, le service du ${serviceName} est complet a ${availability.peakSlot} (${availability.peakOccupancy}/${availability.capacity} couverts).`
       });
     }
 
@@ -354,6 +358,7 @@ router.post('/', async (req, res) => {
     const availability = await checkAvailability(date, time, validation.requestedPeople, ONLINE_CAPACITY_LIMIT);
 
     if (!availability.available) {
+      if (availability.message) return res.status(400).json({ success: false, message: availability.message });
       const serviceName = validation.isMidi ? 'midi' : 'soir';
       return res.status(400).json({
         success: false,
@@ -669,15 +674,23 @@ router.put('/:id', apiKey, async (req, res) => {
       updateFilter['deposit.status'] = { $in: ['paid', 'deducted'] };
     }
     const fields = { ...req.body, updatedAt: new Date() };
+    if (dateChanged || timeChanged) {
+      fields.reminder24hSentAt = null;
+    }
     const affectsCapacity = dateChanged || timeChanged || peopleChanged || phoneChanged || reactivating;
+    const increasesArrivalLoad = dateChanged || timeChanged || checkPeople > existing.numberOfPeople || reactivating;
     let reservation;
     if (affectsCapacity) {
       reservation = await withBookingTransaction([existingDate, checkDate], async session => {
-        const availability = await checkAvailability(checkDate, checkTime, checkPeople, CAPACITY, req.params.id, session);
-        if (!availability.available) throw new Error('Creneau complet : la modification depasserait la capacite.');
+        // Preserve older bookings: contact edits and fewer covers cannot increase pressure.
+        if (increasesArrivalLoad) {
+          const availability = await checkAvailability(checkDate, checkTime, checkPeople, CAPACITY, req.params.id, session);
+          if (!availability.available) throw new Error(availability.message || 'Creneau complet : la modification depasserait la capacite.');
+        }
         // Reject a stale edit even if a competing edit kept the same status.
         const filter = { ...updateFilter, date: existing.date, time: existing.time,
-          numberOfPeople: existing.numberOfPeople, 'deposit.status': depositStateFilter(existing) };
+          numberOfPeople: existing.numberOfPeople, phoneNumber: existing.phoneNumber,
+          'deposit.status': depositStateFilter(existing) };
         if (['website', 'mobile'].includes(existing.source)) {
           fields.activeBookingKey = activeBookingKey(fields.phoneNumber || existing.phoneNumber, checkDate);
         }
@@ -738,7 +751,8 @@ async function cancelReservationCore(reservationId) {
       fields['deposit.refundRequestedAt'] = new Date();
     }
     reservation = await Reservation.findOneAndUpdate(
-      { _id: reservationId, status: before.status,
+      // A concurrent reschedule must invalidate the refund eligibility just read.
+      { _id: reservationId, status: before.status, date: before.date, time: before.time,
         'deposit.status': depositStatus === 'none' ? { $in: [null, 'none'] } : depositStatus },
       { $set: fields },
       { new: true, runValidators: true }
@@ -826,6 +840,7 @@ router.delete('/:id', apiKey, async (req, res) => {
 // Résumé public d'une réservation (page d'annulation client), protégé par le jeton.
 router.get('/:id/public', cancelLimiter, async (req, res) => {
   try {
+    res.set('Cache-Control', 'private, no-store');
     const { token } = req.query;
     const reservation = await Reservation.findById(req.params.id);
 
@@ -842,6 +857,7 @@ router.get('/:id/public', cancelLimiter, async (req, res) => {
         time: reservation.time,
         numberOfPeople: reservation.numberOfPeople,
         status: reservation.status,
+        modifications: reservationChanges.publicState(reservation),
         deposit: {
           required: reservation.deposit.required,
           amountCents: reservation.deposit.amountCents,
@@ -849,6 +865,8 @@ router.get('/:id/public', cancelLimiter, async (req, res) => {
           status: reservation.deposit.status
         },
         cancellationHours: config.cancellationHours,
+        refundDeadline: new Date(getReservationStartUtcMs(reservation)
+          - config.cancellationHours * 3600000).toISOString(),
         refundableNow: reservation.deposit.status === 'paid'
           && hoursUntilReservation(reservation) >= config.cancellationHours
       }

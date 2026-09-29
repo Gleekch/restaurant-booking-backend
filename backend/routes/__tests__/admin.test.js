@@ -15,7 +15,7 @@ test('install metadata is public but admin page, configuration and reservations 
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   try {
-    for (const url of ['/admin/', '/admin/config.js', '/admin/app.js', '/admin/service-ui.css', '/admin/service-ui.js', '/admin/release-controls.js', '/admin/assets/logo.svg', '/admin/assets/brand-spiral.svg', '/admin/assets/fonts/Manrope-Variable.ttf', '/api/reservations']) {
+    for (const url of ['/admin/', '/admin/config.js', '/admin/app.js', '/admin/service-ui.css', '/admin/service-ui.js', '/admin/service-rhythm.js', '/admin/release-controls.js', '/admin/assets/logo.svg', '/admin/assets/brand-spiral.svg', '/admin/assets/fonts/Manrope-Variable.ttf', '/api/reservations']) {
       const response = await fetch(origin + url);
       expect(response.status).toBe(401);
       expect(response.headers.get('www-authenticate')).toBe('Basic realm="Au Murmure des Flots - Admin"');
@@ -36,6 +36,10 @@ test('install metadata is public but admin page, configuration and reservations 
     expect(theme.headers.get('content-type')).toContain('text/css');
     expect(theme.headers.get('cache-control')).toContain('no-store');
     expect(await theme.text()).toContain("--body-font: 'Manrope'");
+    const rhythm = await fetch(origin + '/admin/service-rhythm.js', { headers });
+    expect(rhythm.status).toBe(200);
+    expect(rhythm.headers.get('cache-control')).toContain('no-store');
+    expect(await rhythm.text()).toContain('window.ServiceRhythm');
     for (const [asset, type, minimumBytes] of [
       ['/admin/assets/logo.svg', 'image/svg+xml', 1000],
       ['/admin/assets/brand-spiral.svg', 'image/svg+xml', 500],

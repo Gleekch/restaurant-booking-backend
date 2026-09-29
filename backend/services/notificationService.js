@@ -35,10 +35,11 @@ function depositBlockHtml(reservation) {
 
 // Bloc HTML « Annuler ma réservation »
 function cancelBlockHtml(reservation) {
+  const changesEnabled = process.env.RESERVATION_CHANGES_ENABLED === 'true';
   return `
             <div style="text-align: center; margin: 25px 0; padding: 18px; background-color: #fafaf7; border: 1px solid #e7e5df; border-radius: 8px;">
-              <p style="color: #666; font-size: 13px; margin: 0 0 12px 0;">Un imprévu ? Vous pouvez annuler votre réservation en ligne.</p>
-              <a href="${buildCancelUrl(reservation)}" style="display: inline-block; background-color: #78716c; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-size: 13px;">Annuler ma réservation</a>
+              <p style="color: #666; font-size: 13px; margin: 0 0 12px 0;">${changesEnabled ? 'Un imprévu ? Demandez une modification au restaurant ou annulez en ligne.' : 'Un imprévu ? Vous pouvez annuler votre réservation en ligne.'}</p>
+              <a href="${buildCancelUrl(reservation)}" style="display: inline-block; background-color: #78716c; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-size: 13px;">${changesEnabled ? 'Gérer ma réservation' : 'Annuler ma réservation'}</a>
             </div>`;
 }
 
@@ -610,7 +611,27 @@ async function sendDepositRequestEmailToClient(reservation, checkoutUrl) {
   }
 }
 
+async function sendReservationChangeEmail(reservation, change, state) {
+  if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) return false;
+  const label = value => `${new Date(value.date).toLocaleDateString('fr-FR', { timeZone: 'UTC' })} a ${value.time}, ${value.numberOfPeople} personnes`;
+  const subject = state === 'pending' ? 'Demande de modification recue'
+    : state === 'accepted' ? 'Modification acceptee par le restaurant' : 'Demande de modification refusee';
+  const result = state === 'pending' ? 'Votre reservation actuelle reste valable. Le restaurant doit encore accepter votre demande.'
+    : state === 'accepted' ? `Le restaurant a accepte la modification. Statut de reservation : ${reservation.status === 'confirmed' ? 'confirmee' : 'en attente de confirmation du restaurant'}.`
+      : 'La demande a ete refusee. Votre reservation actuelle est conservee.';
+  const text = [subject, `Client : ${reservation.customerName}`, `Avant : ${label(change.from)}`,
+    `Demande : ${label(change.proposed)}`, `Reservation actuelle : ${label(reservation)}`, result,
+    'Les arrhes deja payees restent inchangees et seront deduites de l addition. Aucun supplement d arrhes n est demande pour les personnes ajoutees.',
+    'Apres acceptation, la date limite de remboursement est recalculee selon la nouvelle date et le nouvel horaire. Consultez votre lien personnel.', `Lien personnel : ${buildCancelUrl(reservation)}`].join('\n\n');
+  const recipients = state === 'pending' ? [process.env.EMAIL_USER, reservation.email].filter(Boolean) : [reservation.email].filter(Boolean);
+  await Promise.all([...new Set(recipients)].map(to => emailTransporter.sendMail({
+    from: `"Au Murmure des Flots" <${process.env.EMAIL_USER}>`, to, subject, text
+  })));
+  return true;
+}
+
 module.exports = {
+  sendReservationChangeEmail,
   verifyEmailConnection: () => emailTransporter.verify(),
   sendPendingEmailToClient,
   sendNotifications,

@@ -1,6 +1,20 @@
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 
+const scheduleSchema = new mongoose.Schema({
+  date: { type: Date, required: true }, time: { type: String, required: true },
+  numberOfPeople: { type: Number, required: true, min: 1 }
+}, { _id: false });
+const changeRequestSchema = new mongoose.Schema({
+  requestId: { type: String, required: true },
+  status: { type: String, enum: ['pending', 'accepted', 'rejected'], required: true },
+  from: { type: scheduleSchema, required: true },
+  proposed: { type: scheduleSchema, required: true },
+  requestedAt: { type: Date, required: true },
+  reviewedAt: Date,
+  reviewedBy: String
+}, { _id: false });
+
 const reservationSchema = new mongoose.Schema({
   customerName: {
     type: String,
@@ -82,6 +96,7 @@ const reservationSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  changeRequests: { type: [changeRequestSchema], default: undefined },
   cancellationToken: {
     type: String,
     default: () => crypto.randomBytes(24).toString('hex')

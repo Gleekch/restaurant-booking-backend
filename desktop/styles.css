@@ -362,13 +362,6 @@ body {
     font-size: 14px;
 }
 
-.service-summary-card p:first-of-type {
-    font-size: 24px;
-    font-weight: 700;
-    color: var(--text);
-    letter-spacing: -0.02em;
-}
-
 .progress-track {
     height: 3px;
     background: var(--border);

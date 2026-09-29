@@ -91,19 +91,19 @@ router.post('/availability', async (req, res) => {
     const isMidi = timeMin >= bounds.midiStart && timeMin <= bounds.midiEnd;
     const isSoir = timeMin >= bounds.soirStart && timeMin <= bounds.soirEnd;
     if (!isMidi && !isSoir) {
-      const midiLimit = bounds.isWeekend ? '13h45' : '13h15';
-      const soirLimit = bounds.isWeekend ? '21h30' : '21h00';
+      const midiLimit = bounds.isMidiExtended ? '14h00' : '13h45';
+      const soirLimit = bounds.isSoirWeekend ? '22h00' : '21h30';
       return res.json({
         success: false,
         available: false,
-        message: `Réservations possibles de 12h00 à ${midiLimit} (midi) ou 18h30 à ${soirLimit} (soir)`
+        message: `Réservations possibles de 12h00 à ${midiLimit} (midi) ou 18h00 à ${soirLimit} (soir)`
       });
     }
     const result = await checkAvailability(date, time, numberOfPeople || 2, 50);
     res.json({
       success: true,
       available: result.available,
-      message: result.available ? 'Créneau disponible' : `Créneau complet à ${result.peakSlot} (${result.peakOccupancy}/${result.capacity} couverts)`
+      message: result.available ? 'Créneau disponible' : result.message || `Créneau complet à ${result.peakSlot} (${result.peakOccupancy}/${result.capacity} couverts)`
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -113,6 +113,21 @@ router.post('/availability', async (req, res) => {
 // Mettre à jour les paramètres (protégé par API key)
 const { apiKey } = require('../middleware/auth');
 const { getPaymentReadiness, getPublicDepositPolicy } = require('../services/paymentService');
+
+router.get('/service-rhythm', apiKey, async (req, res) => {
+  res.set('Cache-Control', 'private, no-store');
+  try {
+    require('../services/capacityService').parseDateInput(req.query.date);
+  } catch {
+    return res.status(400).json({ success: false, message: 'Date invalide.' });
+  }
+  try {
+    const data = await require('../services/serviceRhythmService').getServiceRhythm(req.query.date);
+    res.json({ success: true, data });
+  } catch {
+    res.status(503).json({ success: false, message: 'Charge des vagues indisponible. Reessayez avant de vous y fier.' });
+  }
+});
 
 router.get('/deposit-policy', (req, res) => {
   res.set('Cache-Control', 'no-store');

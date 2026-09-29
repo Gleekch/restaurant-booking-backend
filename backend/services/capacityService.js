@@ -15,6 +15,8 @@ const SOIR_DURATION = parseInt(process.env.SOIR_DURATION_MIN, 10) || 120;
 const SLOT_MAX_COVERS = parseInt(process.env.SLOT_MAX_COVERS, 10) || 15;
 const SLOT_TOLERANCE = parseInt(process.env.SLOT_TOLERANCE, 10) || 2;
 const SLOT_HARD_LIMIT = SLOT_MAX_COVERS + SLOT_TOLERANCE;
+const ARRIVAL_WINDOW_MINUTES = 30;
+const ARRIVAL_WINDOW_MAX_COVERS = 20;
 
 function parseDateInput(date) {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -127,12 +129,14 @@ async function getOccupancyMap(date, excludeId, session) {
   const reservations = await (session ? request.session(session) : request);
   const occupancy = {};
   const arrivals = {};
+  const arrivalMinutes = {};
 
   for (const reservation of reservations) {
     const startMin = timeToMinutes(reservation.time);
     const duration = getMealDuration(startMin);
     const endMin = startMin + duration;
 
+    arrivalMinutes[startMin] = (arrivalMinutes[startMin] || 0) + reservation.numberOfPeople;
     const arrivalSlot = Math.floor(startMin / 15) * 15;
     arrivals[arrivalSlot] = (arrivals[arrivalSlot] || 0) + reservation.numberOfPeople;
 
@@ -141,7 +145,22 @@ async function getOccupancyMap(date, excludeId, session) {
     }
   }
 
-  return { occupancy, arrivals, reservations };
+  return { occupancy, arrivals, arrivalMinutes, reservations };
+}
+
+// Check every half-open window containing the new arrival, including off-grid
+// phone bookings and arrivals after the requested time (not just the past 30 min).
+function getArrivalWindowLoad(startMin, requestedPeople, arrivalMinutes) {
+  let peakCovers = requestedPeople;
+  let peakStart = startMin;
+  for (let start = startMin - ARRIVAL_WINDOW_MINUTES + 1; start <= startMin; start++) {
+    let covers = requestedPeople;
+    for (let minute = start; minute < start + ARRIVAL_WINDOW_MINUTES; minute++) {
+      covers += arrivalMinutes[minute] || 0;
+    }
+    if (covers > peakCovers) { peakCovers = covers; peakStart = start; }
+  }
+  return { peakCovers, peakStart };
 }
 
 async function checkAvailability(date, time, numberOfPeople, limit, excludeId, session) {
@@ -152,8 +171,16 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId, s
   }
 
   const effectiveLimit = Math.min(limit || CAPACITY, CAPACITY);
-  const { occupancy, arrivals } = await getOccupancyMap(date, excludeId, session);
+  const { occupancy, arrivals, arrivalMinutes } = await getOccupancyMap(date, excludeId, session);
   const startMin = timeToMinutes(time);
+
+  const arrivalLoad = getArrivalWindowLoad(startMin, requestedPeople, arrivalMinutes);
+  if (arrivalLoad.peakCovers > ARRIVAL_WINDOW_MAX_COVERS) {
+    return { available: false, reason: 'arrival-window-full',
+      message: `Trop d arrivees rapprochees : maximum ${ARRIVAL_WINDOW_MAX_COVERS} couverts sur ${ARRIVAL_WINDOW_MINUTES} minutes. Choisissez un autre horaire.`,
+      peakOccupancy: arrivalLoad.peakCovers, capacity: ARRIVAL_WINDOW_MAX_COVERS,
+      arrivalWindowMinutes: ARRIVAL_WINDOW_MINUTES };
+  }
 
   // Vérification 1 : limite d'arrivées par créneau — uniquement pour les réservations en ligne
   if (effectiveLimit < CAPACITY) {
@@ -206,7 +233,7 @@ function getServiceBounds(date) {
     isMidiExtended,
     isSoirWeekend,
     midiStart: 720,                              // 12:00
-    midiEnd: isMidiExtended ? 840 : 810,         // 14:00 ou 13:30
+    midiEnd: isMidiExtended ? 840 : 825,         // 14:00 ou 13:45
     soirStart: 1080,                             // 18:00
     soirEnd: isSoirWeekend ? 1320 : 1290,        // 22:00 ou 21:30
     midiWaveCutoff: isMidiExtended ? 780 : 765,  // 13:00 ou 12:45
@@ -214,10 +241,10 @@ function getServiceBounds(date) {
   };
 }
 
-async function getAvailableSlots(date, numberOfPeople, limit) {
+async function getAvailableSlots(date, numberOfPeople, limit, excludeId) {
   const requestedPeople = parseInt(numberOfPeople, 10) || 2;
   const effectiveLimit = Math.min(limit || CAPACITY, CAPACITY);
-  const { occupancy, arrivals } = await getOccupancyMap(date);
+  const { occupancy, arrivals, arrivalMinutes } = await getOccupancyMap(date, excludeId);
   const bounds = getServiceBounds(date);
   const restaurantNow = getRestaurantNow();
   const isToday = date === restaurantNow.date;
@@ -233,6 +260,10 @@ async function getAvailableSlots(date, numberOfPeople, limit) {
     }
 
     if ((arrivals[startMin] || 0) + requestedPeople > SLOT_HARD_LIMIT) {
+      return false;
+    }
+
+    if (getArrivalWindowLoad(startMin, requestedPeople, arrivalMinutes).peakCovers > ARRIVAL_WINDOW_MAX_COVERS) {
       return false;
     }
 
@@ -283,5 +314,8 @@ module.exports = {
   getRestaurantNow,
   CAPACITY,
   SLOT_MAX_COVERS,
-  SLOT_HARD_LIMIT
+  SLOT_HARD_LIMIT,
+  ARRIVAL_WINDOW_MINUTES,
+  ARRIVAL_WINDOW_MAX_COVERS,
+  getArrivalWindowLoad
 };

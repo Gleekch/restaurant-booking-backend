@@ -15,66 +15,6 @@ let currentView = 'today';
 let blockedServicesCache = []; // services bloqués pour la date affichée
 
 const ONLINE_CAPACITY_LIMIT = 50;
-const WAVE_LIMIT = 25;
-
-function toTimeStr(min) {
-    return `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
-}
-
-function formatHeure(min) {
-    const h = Math.floor(min / 60);
-    const m = min % 60;
-    return m === 0 ? `${h}h00` : `${h}h${String(m).padStart(2, '0')}`;
-}
-
-function getLoadClass(covers, limit) {
-    if (covers >= limit) return 'red';
-    if (covers >= limit * 0.8) return 'yellow';
-    return 'green';
-}
-
-function getWaveCutoffs(date) {
-    const day = date.getDay();
-    const isMidiExtended = day === 5 || day === 6 || day === 0;
-    const isSoirWeekend = day === 6;
-    return {
-        midiCutoffMin: isMidiExtended ? 780 : 765,
-        soirCutoffMin: isSoirWeekend ? 1200 : 1185,
-        midiEndStr: isMidiExtended ? '14h00' : '13h30',
-        soirEndStr: isSoirWeekend ? '22h00' : '21h30'
-    };
-}
-
-function getWaveSummary(serviceReservations, cutoffStr) {
-    const active = serviceReservations.filter(r => !['cancelled', 'awaiting-payment'].includes(r.status));
-    const wave1 = active.filter(r => r.time < cutoffStr);
-    const wave2 = active.filter(r => r.time >= cutoffStr);
-    return {
-        wave1: { count: wave1.length, covers: wave1.reduce((s, r) => s + r.numberOfPeople, 0) },
-        wave2: { count: wave2.length, covers: wave2.reduce((s, r) => s + r.numberOfPeople, 0) }
-    };
-}
-
-function renderWaveBreakdown(waveSummary, labels) {
-    return `
-        <div class="wave-breakdown">
-            <div class="wave-row">
-                <span class="wave-label">${labels.v1}</span>
-                <span class="wave-covers">${waveSummary.wave1.covers} cvts</span>
-                <div class="wave-track">
-                    <div class="wave-fill ${getLoadClass(waveSummary.wave1.covers, WAVE_LIMIT)}" style="width:${Math.min((waveSummary.wave1.covers / WAVE_LIMIT) * 100, 100)}%"></div>
-                </div>
-            </div>
-            <div class="wave-row">
-                <span class="wave-label">${labels.v2}</span>
-                <span class="wave-covers">${waveSummary.wave2.covers} cvts</span>
-                <div class="wave-track">
-                    <div class="wave-fill ${getLoadClass(waveSummary.wave2.covers, WAVE_LIMIT)}" style="width:${Math.min((waveSummary.wave2.covers / WAVE_LIMIT) * 100, 100)}%"></div>
-                </div>
-            </div>
-        </div>
-    `;
-}
 
 // Basic Auth is kept by the browser, never copied into JS or localStorage.
 function apiFetch(url, options = {}) {
@@ -187,6 +127,7 @@ function updatePendingBadge() {
 
 // Render Current View
 function renderView() {
+    window.ReservationChanges?.updateQueue(reservations, showReservationDetail);
     switch (currentView) {
         case 'today':
             renderTodayView();
@@ -245,19 +186,6 @@ async function renderTodayView() {
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const dateISO = displayDate.getFullYear() + '-' + String(displayDate.getMonth()+1).padStart(2,'0') + '-' + String(displayDate.getDate()).padStart(2,'0');
     await loadBlockedServices(dateISO);
-    const cutoffs = getWaveCutoffs(displayDate);
-    const midiCutoffStr = toTimeStr(cutoffs.midiCutoffMin);
-    const soirCutoffStr = toTimeStr(cutoffs.soirCutoffMin);
-    const midiWaveLabels = {
-        v1: `Vague 1  12h00–${formatHeure(cutoffs.midiCutoffMin)}`,
-        v2: `Vague 2  ${formatHeure(cutoffs.midiCutoffMin)}–${cutoffs.midiEndStr}`
-    };
-    const soirWaveLabels = {
-        v1: `Vague 1  18h00–${formatHeure(cutoffs.soirCutoffMin)}`,
-        v2: `Vague 2  ${formatHeure(cutoffs.soirCutoffMin)}–${cutoffs.soirEndStr}`
-    };
-    const midiWaves = getWaveSummary(midi, midiCutoffStr);
-    const soirWaves = getWaveSummary(soir, soirCutoffStr);
 
     content.innerHTML = `
         <div class="summary-card">
@@ -280,7 +208,7 @@ async function renderTodayView() {
                 <h3>Service du Midi ${isServiceBlocked('midi') ? '<span style="background:#dc2626;color:white;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h3>
                 <span class="service-count">${midi.length} rés. / ${midiCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>${renderOnlineClosure(dateISO, 'midi')}
             </div>
-            ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
+            ${window.ServiceRhythm?.placeholder('midi', dateISO) || ''}
             <div style="text-align:right; margin: 8px 14px 0;">
               <button class="btn-block-service" data-date="${dateISO}" data-service="midi" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">Marquer complet</button>
             </div>
@@ -296,7 +224,7 @@ async function renderTodayView() {
                 <h3>Service du Soir ${isServiceBlocked('soir') ? '<span style="background:#dc2626;color:white;font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px;">COMPLET EN LIGNE</span>' : ''}</h3>
                 <span class="service-count">${soir.length} rés. / ${soirCovers}/${ONLINE_CAPACITY_LIMIT} couv.</span>${renderOnlineClosure(dateISO, 'soir')}
             </div>
-            ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
+            ${window.ServiceRhythm?.placeholder('soir', dateISO) || ''}
             <div style="text-align:right; margin: 8px 14px 0;">
               <button class="btn-block-service" data-date="${dateISO}" data-service="soir" style="font-size:12px; padding:4px 10px; border:1px solid var(--danger); background:transparent; color:var(--danger-text); border-radius:var(--radius-sm); cursor:pointer; font-family:inherit;">Marquer complet</button>
             </div>
@@ -309,6 +237,7 @@ async function renderTodayView() {
 
     attachCardListeners();
     attachBlockButtons();
+    loadServiceRhythm(dateISO);
 }
 
 // Render Pending View
@@ -494,18 +423,21 @@ async function showDayDetail(dateISO) {
         <div class="service-section">
             <div class="service-header midi"><span>☀️</span><h3>Midi</h3><span class="service-count">${midi.length} rés. / ${midi.reduce((s, r) => s + r.numberOfPeople, 0)} couv.</span></div>
             ${renderOnlineClosure(dateISO, 'midi')}${blockBtn('midi')}
+            ${window.ServiceRhythm?.placeholder('midi', dateISO) || ''}
             ${midi.length === 0 ? '<div class="empty-state"><p>Aucune réservation</p></div>' :
                 `<div class="reservations-grid">${midi.map(r => renderReservationCard(r)).join('')}</div>`}
         </div>
         <div class="service-section">
             <div class="service-header soir"><span>🌙</span><h3>Soir</h3><span class="service-count">${soir.length} rés. / ${soir.reduce((s, r) => s + r.numberOfPeople, 0)} couv.</span></div>
             ${renderOnlineClosure(dateISO, 'soir')}${blockBtn('soir')}
+            ${window.ServiceRhythm?.placeholder('soir', dateISO) || ''}
             ${soir.length === 0 ? '<div class="empty-state"><p>Aucune réservation</p></div>' :
                 `<div class="reservations-grid">${soir.map(r => renderReservationCard(r)).join('')}</div>`}
         </div>
     `;
     attachCardListeners();
     attachBlockButtons(() => showDayDetail(dateISO));
+    loadServiceRhythm(dateISO);
 }
 
 // Render Reservation Card
@@ -566,6 +498,7 @@ function renderReservationCard(r) {
                 <span class="card-status ${escapeHtml(r.status)}">${escapeHtml(STATUS_TEXT[r.status] || r.status)}</span>
             </div>
             <div class="card-name">${escapeHtml(r.customerName)}</div>
+            ${window.ReservationChanges?.badge(r) || ''}
             <div class="guest-line"><span><strong>${escapeHtml(r.numberOfPeople)}</strong> couverts</span><span>${r.table ? 'Table ' + escapeHtml(r.table) : 'Table à attribuer'}</span></div>
             <div class="guest-phone">${escapeHtml(r.phoneNumber)}</div>
             <div class="card-deposit">${badge}
@@ -689,6 +622,7 @@ async function showDayServiceDetail(dateISO, service) {
             </div>
         </div>
 
+        ${window.ServiceRhythm?.placeholder(service, dateISO) || ''}
         ${filtered.length === 0 ? `
             <div class="empty-state">
                 <div class="emoji">📭</div>
@@ -704,6 +638,15 @@ async function showDayServiceDetail(dateISO, service) {
 
     attachCardListeners();
     attachBlockButtons(() => showDayServiceDetail(dateISO, service));
+    loadServiceRhythm(dateISO);
+}
+
+function loadServiceRhythm(dateISO) {
+    return window.ServiceRhythm?.load(content, dateISO, async endpoint => {
+        const response = await apiFetch(`${API_URL}${endpoint}`);
+        if (!response.ok) throw new Error('Charge indisponible');
+        return response.json();
+    });
 }
 
 // Attach Card Click Listeners
@@ -749,6 +692,9 @@ function showReservationDetail(r) {
     ` : '';
 
     document.getElementById('modal-title').textContent = r.customerName;
+    const editButton = document.getElementById('edit-reservation-btn');
+    editButton.hidden = false;
+    editButton.onclick = () => openEditForm(r._id);
     document.getElementById('modal-body').innerHTML = `
         <div class="detail-section">
             <div class="detail-row">
@@ -787,6 +733,7 @@ function showReservationDetail(r) {
             ` : ''}
         </div>
 
+        ${window.ReservationChanges?.panel(r) || ''}
         ${window.ServiceRelease.financePanel()}
         <div class="detail-actions">
             ${r.status !== 'confirmed' ? `
@@ -799,11 +746,18 @@ function showReservationDetail(r) {
                 <button class="btn btn-secondary" disabled data-unavailable aria-describedby="release-finance-note" title="Suivi d arrivee indisponible dans cette version">Client installé</button>
                 <button class="btn btn-warning" onclick="markNoShow('${safeReservationId(r._id)}')">No-show</button>
             ` : ''}
-            <button class="btn btn-secondary" onclick="openEditForm('${safeReservationId(r._id)}')">Modifier</button>
             <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
         </div>
     `;
 
+    window.ReservationChanges?.bind(document.getElementById('modal-body'), r, async (endpoint, options) => {
+        const response = await apiFetch(`${API_URL}${endpoint}`, {
+            method: options.method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Modification non enregistree.');
+        return result;
+    }, async () => { closeModal(); await loadReservations(); });
     document.getElementById('reservation-modal').classList.add('active');
 }
 
@@ -812,6 +766,9 @@ function openEditForm(id) {
     const r = reservations.find(r => r._id === id);
     if (!r) return;
 
+    const editButton = document.getElementById('edit-reservation-btn');
+    editButton.hidden = true;
+    editButton.onclick = null;
     const existingDate = new Date(r.date).toISOString().split('T')[0];
 
     document.getElementById('modal-title').textContent = 'Modifier la réservation';
@@ -866,6 +823,7 @@ function openEditForm(id) {
         e.preventDefault();
         await submitEdit(id);
     });
+    document.getElementById('edit-name').focus();
 }
 
 async function submitEdit(id) {

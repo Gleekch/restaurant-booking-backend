@@ -108,42 +108,6 @@ function getLoadClass(totalCovers, limit = ONLINE_CAPACITY_LIMIT) {
     return '';
 }
 
-function getWaveSummary(serviceReservations, cutoff) {
-    const active = serviceReservations.filter(isActiveReservation);
-    const wave1 = active.filter(r => r.time < cutoff);
-    const wave2 = active.filter(r => r.time >= cutoff);
-    return {
-        wave1: { count: wave1.length, covers: wave1.reduce((s, r) => s + r.numberOfPeople, 0) },
-        wave2: { count: wave2.length, covers: wave2.reduce((s, r) => s + r.numberOfPeople, 0) }
-    };
-}
-
-function formatMinutes(min) {
-    return `${String(Math.floor(min / 60)).padStart(2, '0')}h${String(min % 60).padStart(2, '0')}`;
-}
-
-function renderWaveBreakdown(waveSummary, labels) {
-    const limit = 25;
-    return `
-        <div class="wave-breakdown">
-            <div class="wave-row">
-                <span class="wave-label">${labels.v1}</span>
-                <span class="wave-covers">${waveSummary.wave1.covers} cvts</span>
-                <div class="progress-track wave-track">
-                    <div class="progress-fill ${getLoadClass(waveSummary.wave1.covers, limit)}" style="width:${Math.min((waveSummary.wave1.covers / limit) * 100, 100)}%;"></div>
-                </div>
-            </div>
-            <div class="wave-row">
-                <span class="wave-label">${labels.v2}</span>
-                <span class="wave-covers">${waveSummary.wave2.covers} cvts</span>
-                <div class="progress-track wave-track">
-                    <div class="progress-fill ${getLoadClass(waveSummary.wave2.covers, limit)}" style="width:${Math.min((waveSummary.wave2.covers / limit) * 100, 100)}%;"></div>
-                </div>
-            </div>
-        </div>
-    `;
-}
-
 async function updateRecommendedHours(selectedDate) {
     try {
         const data = await api.getAvailability(selectedDate, 2);
@@ -302,6 +266,7 @@ async function loadReservations() {
 
 // Afficher les réservations
 function displayReservations() {
+    window.ReservationChanges?.updateQueue(reservations, showReservationDetails);
     hideSections();
 
     if (currentView === 'service-detail') {
@@ -502,6 +467,7 @@ function createReservationCard(reservation) {
             <span class="reservation-status status-${escapeHtml(reservation.status)}">${escapeHtml(getStatusText(reservation.status))}</span>
         </div>
         <div class="card-name">${escapeHtml(reservation.customerName)}</div>
+        ${window.ReservationChanges?.badge(reservation) || ''}
         <div class="guest-line"><span><strong>${escapeHtml(reservation.numberOfPeople)}</strong> couverts</span><span>${reservation.table ? 'Table ' + escapeHtml(reservation.table) : 'Table à attribuer'}</span></div>
         <div class="guest-phone">${escapeHtml(reservation.phoneNumber)}</div>
         <div class="card-deposit">
@@ -567,12 +533,17 @@ function showReservationDetails(reservation) {
             <div class="detail-field"><span>Email</span>${escapeHtml(reservation.email || 'Non renseigné')}</div>
         </div>
         ${getDepositText(reservation) ? `<div class="finance-summary"><span>Arrhes · suivi du paiement</span>${getDepositText(reservation)}</div>` : ''}
+        ${window.ReservationChanges?.panel(reservation) || ''}
         ${window.ServiceRelease.financePanel(false)}
         <p><strong>Source :</strong> ${escapeHtml(reservation.source)}</p>
         ${reservation.specialRequests ? `<div class="guest-note"><strong>Demandes spéciales</strong>${escapeHtml(reservation.specialRequests)}</div>` : ''}
         ${reservation.notes ? `<div class="guest-note"><strong>Notes de service</strong>${escapeHtml(reservation.notes)}</div>` : ''}
     `;
 
+    window.ReservationChanges?.bind(details, reservation, (endpoint, options) => api.apiRequest(endpoint, options), async () => {
+        modal.style.display = 'none';
+        await loadReservations();
+    });
     // Configurer les boutons
     const confirmBtn = document.getElementById('confirm-btn');
     const cancelBtn = document.getElementById('cancel-btn');
@@ -1114,9 +1085,11 @@ function displayServiceDetail() {
             <p>${summary.totalCovers} couverts / ${summary.totalReservations} réservations</p>
             ${summary.cancelledCount > 0 ? `<small>${summary.cancelledCount} réservation(s) annulée(s) visible(s), non comptée(s).</small>` : ''}
         </div>
+        ${window.ServiceRhythm?.placeholder(serviceDetailState.service, serviceDetailState.dateValue) || ''}
         <div class="reservations-subgrid" id="service-detail-cards"></div>
     `;
 
+    window.ServiceRhythm?.load(serviceDetailContainer, serviceDetailState.dateValue, endpoint => api.apiRequest(endpoint));
     const cardsContainer = document.getElementById('service-detail-cards');
 
     if (serviceReservations.length === 0) {
@@ -1252,25 +1225,9 @@ function renderOperationalDayView() {
     const isMidiExtended = dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0;
     const isSoirWeekend = dayOfWeek === 6;
 
-    const midiCutoffMin = isMidiExtended ? 780 : 765; // 13:00 ou 12:45
-    const soirCutoffMin = isSoirWeekend ? 1200 : 1185; // 20:00 ou 19:45
-    const midiCutoffStr = formatMinutes(midiCutoffMin);
-    const soirCutoffStr = formatMinutes(soirCutoffMin);
-    const midiEndStr = isMidiExtended ? '14h00' : '13h30';
+    const midiEndStr = isMidiExtended ? '14h00' : '13h45';
     const soirEndStr = isSoirWeekend ? '22h00' : '21h30';
 
-    const midiWaveLabels = {
-        v1: `Vague 1  12h00–${midiCutoffStr}`,
-        v2: `Vague 2  ${midiCutoffStr}–${midiEndStr}`
-    };
-    const soirWaveLabels = {
-        v1: `Vague 1  18h00–${soirCutoffStr}`,
-        v2: `Vague 2  ${soirCutoffStr}–${soirEndStr}`
-    };
-
-    const toTimeStr = (min) => `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`;
-    const midiWaves = getWaveSummary(midiReservations, toTimeStr(midiCutoffMin));
-    const soirWaves = getWaveSummary(soirReservations, toTimeStr(soirCutoffMin));
     const showMidi = currentServiceFilter === 'all' || currentServiceFilter === 'midi';
     const showSoir = currentServiceFilter === 'all' || currentServiceFilter === 'soir';
 
@@ -1291,7 +1248,7 @@ function renderOperationalDayView() {
                     <div class="progress-track">
                         <div class="progress-fill ${getLoadClass(midiSummary.totalCovers)}" style="width: ${Math.min((midiSummary.totalCovers / ONLINE_CAPACITY_LIMIT) * 100, 100)}%;"></div>
                     </div>
-                    ${renderWaveBreakdown(midiWaves, midiWaveLabels)}
+                    ${window.ServiceRhythm?.placeholder('midi', selectedDate) || ''}
                     <div class="wave-recommended" id="wave-recommended-midi"></div>
                     <div class="service-controls"><span>Gestion du service</span>
                         <button class="btn-block-service" data-date="${selectedDate}" data-service="midi" style="font-size:11px; padding:4px 10px; border:1px solid #dc2626; background:transparent; color:#dc2626; border-radius:4px; cursor:pointer;">Marquer complet</button>
@@ -1307,7 +1264,7 @@ function renderOperationalDayView() {
                     <div class="progress-track">
                         <div class="progress-fill ${getLoadClass(soirSummary.totalCovers)}" style="width: ${Math.min((soirSummary.totalCovers / ONLINE_CAPACITY_LIMIT) * 100, 100)}%;"></div>
                     </div>
-                    ${renderWaveBreakdown(soirWaves, soirWaveLabels)}
+                    ${window.ServiceRhythm?.placeholder('soir', selectedDate) || ''}
                     <div class="wave-recommended" id="wave-recommended-soir"></div>
                     <div class="service-controls"><span>Gestion du service</span>
                         <button class="btn-block-service" data-date="${selectedDate}" data-service="soir" style="font-size:11px; padding:4px 10px; border:1px solid #dc2626; background:transparent; color:#dc2626; border-radius:4px; cursor:pointer;">Marquer complet</button>
@@ -1320,6 +1277,7 @@ function renderOperationalDayView() {
     `;
 
     updateRecommendedHours(selectedDate);
+    window.ServiceRhythm?.load(reservationsContainer, selectedDate, endpoint => api.apiRequest(endpoint));
 
     if (showMidi) {
         const midiGrid = document.getElementById('today-midi-grid');
@@ -1337,7 +1295,7 @@ function renderOperationalDayView() {
 
     reservationsContainer.querySelectorAll('.service-summary-card').forEach((element) => {
         element.addEventListener('click', (e) => {
-            if (e.target.closest('.btn-block-service')) return;
+            if (e.target.closest('.btn-block-service, .service-rhythm')) return;
             openServiceDetail(element.dataset.date, element.dataset.service, 'today');
         });
     });
