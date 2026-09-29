@@ -48,6 +48,14 @@
 .fp-pair { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
 .fp-move { display:flex; flex-wrap:wrap; gap:5px; }
 .fp-bookings { margin-top:20px; }
+.fp-bookings-heading { display:flex; justify-content:space-between; align-items:center; gap:18px; flex-wrap:wrap; }
+.fp-bookings-heading h3 { margin:0 0 8px; }
+.fp-bookings-heading>div { flex:1 1 300px; }
+.fp-bookings-heading>label { flex:0 1 230px; }
+.fp-booking-info { min-width:0; overflow-wrap:anywhere; }
+.fp-booking-info>strong { display:block; margin:5px 0; }
+.fp-booking-order { display:inline-block; font-size:11px; font-weight:600; color:var(--brand-ink,#114a55); background:#dfedeb; border:1px solid #b7d1cc; border-radius:6px; padding:4px 8px; }
+.fp-created-at { color:var(--text-secondary,#536d6d); }
 .fp-booking { padding:14px 0; border-bottom:1px solid var(--border,#dbe3df); display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .fp-booking p { margin:3px 0; font-size:12px; }
 .fp-selection-summary { padding:12px 14px; border:1px solid var(--border,#dbe3df); border-radius:10px; background:var(--surface,#fffefa); font-size:13px; line-height:1.6; overflow-wrap:anywhere; }

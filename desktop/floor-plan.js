@@ -6,6 +6,19 @@
   const serviceOf = r => String(r.time) < '15:00' ? 'midi' : 'soir';
   const dateOf = r => String(r.date).slice(0, 10);
   const planPath = r => `/api/floor-plans/service?date=${dateOf(r)}&service=${serviceOf(r)}`;
+  const hasOrder = b => Number.isInteger(b.bookingOrder) && b.bookingOrder > 0;
+  function orderedBookings(rows, order = 'booking') {
+    const priority = b => hasOrder(b) ? b.bookingOrder : Infinity;
+    return [...rows].sort((a, b) =>
+      (order === 'time' ? a.time.localeCompare(b.time) : 0)
+      || priority(a) - priority(b) || String(a.id).localeCompare(String(b.id)));
+  }
+  function creationLabel(b) {
+    const date = b.createdAt ? new Date(b.createdAt) : null;
+    return date && Number.isFinite(date.getTime())
+      ? `Prise le ${new Intl.DateTimeFormat('fr-FR', { timeZone: 'Indian/Reunion', dateStyle: 'short', timeStyle: 'short' }).format(date)} (Reunion)`
+      : 'Date de prise inconnue : priorite a verifier.';
+  }
   function tableLabel(r) {
     return `<span data-table-reservation="${escape(r._id)}">Chargement des tables...</span>`;
   }
@@ -32,6 +45,8 @@
           const names = a?.tableIds.map(id => plan.layout.tables.find(t => t.id === id)?.name || '?');
           el.textContent = a ? `${a.review ? 'Placement a revoir : ' : 'Tables : '}${names.join(' + ')}` : 'Table a attribuer';
           if (r.table) el.textContent += ` (ancienne note : ${r.table})`;
+          const b = plan.bookings?.find(b => b.id === String(r._id));
+          if (b && hasOrder(b)) el.textContent += ` · Ordre de reservation : n° ${b.bookingOrder}`;
         }
       } catch (_) {
         for (const { el, r } of entries) if (el.isConnected && el.floorPlanLabelRequest === token) el.textContent = `Placement indisponible${r.table ? ` (ancienne note : ${r.table})` : ''}`;
@@ -79,6 +94,7 @@
     if (instances.has(root)) { instances.get(root).refresh?.(); return; }
     const s = { date: options.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'Indian/Reunion', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()), service: options.service || 'midi', focusBooking: options.reservationId || null, template: false, zone: 'terrace', selected: new Set(), dirty: false, editDirty: false, edit: null, busy: false, data: null, adding: null, message: '', error: false, generation: 0, refreshing: false, remoteChanged: false, syncError: '' };
     instances.set(root, s);
+    s.order = 'booking';
     s.events = new AbortController();
     const on = (name, handler) => root.addEventListener(name, handler, { signal: s.events.signal });
     const endpoint = () => s.template ? '/api/floor-plans/template' : `/api/floor-plans/service?date=${s.date}&service=${s.service}`;
@@ -250,7 +266,7 @@
         ${s.data ? `<p class="staff-muted">${s.template ? 'Le plan type initialise les futurs services. Les services deja enregistres restent inchanges.' : `${s.data.closed ? 'Service habituellement ferme : aucune nouvelle reservation autorisee. ' : ''}Une table est attribuee a un seul groupe pour tout le service. Pas de second placement automatique.`} Les places du plan ne remplacent pas les limites de reservation.</p>
         <div class="fp-workspace"><div><div class="fp-tabs">${s.data.layout.zones.map(z => `<button type="button" data-zone="${z.id}" aria-pressed="${s.zone === z.id}">${escape(z.name)} · ${s.data.layout.tables.filter(t => t.zone === z.id).reduce((n, t) => n + t.seats, 0)} places</button>`).join('')}</div><div class="fp-board-wrap"><div class="fp-board" aria-label="Disposition des tables"></div></div><p class="staff-muted">Glissez les tables pour les deplacer. Touchez plusieurs tables pour les regrouper. Sur telephone, faites defiler le plan horizontalement depuis une zone vide. Les fleches du clavier deplacent la table selectionnee.</p></div>
         <aside class="fp-side"><div><h3>Composer la salle</h3><p class="staff-muted">${s.data.layout.tables.length} table(s) · ${s.selected.size} selectionnee(s)</p><div class="fp-actions"><button type="button" data-action="add">+ Ajouter une table</button><button type="button" data-action="clear">Deselectionner</button></div><details class="fp-catalog" ${!s.data.layout.tables.length ? 'open' : ''}><summary>Numeros du restaurant</summary><p class="staff-muted">Choisissez un numero, sa zone et ses places. Rien n'est ajoute sans validation.</p><div>${(s.data.tableCatalog || []).map(name => `<button type="button" data-catalog="${escape(name)}" aria-label="Ajouter la table ${escape(name)}" ${s.data.layout.tables.some(t => t.name === name) ? 'disabled' : ''}>${escape(name)}</button>`).join('')}</div></details></div><div data-editor></div></aside></div>
-        ${!s.template ? '<div class="fp-bookings"><h3>Reservations du service</h3><p class="staff-muted">Selectionnez une ou plusieurs tables, puis cliquez sur Placer. Les anciens numeros saisis dans les fiches restent visibles comme notes, sans attribution automatique.</p><div data-bookings></div></div>' : ''}` : '<p class="staff-muted">Le plan necessite le backend mis a jour. Aucune donnee existante n\'est modifiee en cas d\'indisponibilite.</p>'}</fieldset></section>`;
+        ${!s.template ? `<div class="fp-bookings"><div class="fp-bookings-heading"><div><h3>Reservations du service</h3><p class="staff-muted">Les premieres reservations sont prioritaires pour les tables proches de la mer. Le rang suit la date de prise initiale, pas l'heure du repas ni la confirmation.</p></div><label>Trier les reservations<select data-control="order"><option value="booking" ${s.order === 'booking' ? 'selected' : ''}>Ordre de reservation</option><option value="time" ${s.order === 'time' ? 'selected' : ''}>Heure du repas</option></select></label></div><p class="staff-muted">Selectionnez les tables sur le plan, puis cliquez sur Placer et Enregistrer le plan. Le placement reste manuel, selon les places et les demandes des clients. Aucun placement existant n'est deplace automatiquement.</p><div data-bookings></div></div>` : ''}` : '<p class="staff-muted">Le plan necessite le backend mis a jour. Aucune donnee existante n\'est modifiee en cas d\'indisponibilite.</p>'}</fieldset></section>`;
       if (s.data) { board(); editor(); bookings(); }
       if (focus) root.querySelector(`[data-control="${focus}"]`)?.focus();
       if (field) {
@@ -286,15 +302,16 @@
       if (!el) return;
       const tables = selectedTables();
       const placedIds = new Set(s.data.assignments.map(a => a.reservationId));
-      const rows = [...s.data.bookings].sort((a, b) => a.time.localeCompare(b.time));
+      const rows = orderedBookings(s.data.bookings, s.order);
       for (const a of s.data.assignments) if (!booking(a.reservationId)) rows.push({ id: a.reservationId, name: 'Reservation annulee ou deplacee', time: '', people: null });
       const selection = tables.length ? `Tables selectionnees : ${tables.map(t => t.name).join(' + ')} / ${tables.reduce((n, t) => n + t.seats, 0)} places au total.` : 'Aucune table selectionnee. Choisissez les tables du prochain groupe sur le plan.';
-      el.innerHTML = `<p class="fp-selection-summary" role="status">${escape(selection)}</p>` + (rows.map(b => {
+      const unknown = s.data.bookings.filter(b => !hasOrder(b)).length;
+      el.innerHTML = `<p class="fp-selection-summary" role="status">${escape(selection)}</p><p class="staff-muted">Rang parmi les reservations de ce service dont la date de prise est connue ; un meme horodatage donne le meme rang.${unknown ? ` ${unknown} reservation(s) sans date connue : verifiez leur priorite manuellement.` : ''}</p>` + (rows.map(b => {
         const a = s.data.assignments.find(a => a.reservationId === b.id);
         const labels = a?.tableIds.map(id => s.data.layout.tables.find(t => t.id === id)?.name || '?').join(' + ');
         // A selection advises unplaced groups only; Replacer still validates on click.
         const feedback = b.people && !a && placementFeedback(b, tables);
-        return `<article class="fp-booking" data-focus-booking="${s.focusBooking === b.id}" data-review="${Boolean(a?.review)}"><div><strong>${escape(b.name)}</strong>${s.focusBooking === b.id ? '<p>Reservation selectionnee : choisissez ses tables puis enregistrez le plan.</p>' : ''}<p>${escape(b.time)}${b.people ? ` · ${b.people} couverts` : ''}${b.status === 'pending' ? ' · A confirmer' : ''}</p><p>${a ? `${a.review ? 'A revoir : ' : 'Tables : '}${escape(labels)}` : 'Non placee'}${b.legacyTable ? ` · Ancienne note : ${escape(b.legacyTable)}` : ''}</p>${feedback ? `<p id="fp-placement-${escape(b.id)}" class="fp-placement-feedback" data-placement-feedback="${escape(b.id)}" data-error="${feedback.error}">${escape(feedback.message)}</p>` : ''}</div><div class="fp-actions">${b.people ? `<button type="button" data-open="${escape(b.id)}">Fiche</button><button type="button" data-place="${escape(b.id)}" ${feedback ? `aria-describedby="fp-placement-${escape(b.id)}"` : ''} ${!s.selected.size ? 'disabled' : ''}>${placedIds.has(b.id) ? 'Replacer' : 'Placer'}</button>` : ''}${a ? `<button type="button" data-unplace="${escape(b.id)}">Retirer du plan</button>` : ''}</div></article>`;
+        return `<article class="fp-booking" data-booking-id="${escape(b.id)}" data-focus-booking="${s.focusBooking === b.id}" data-review="${Boolean(a?.review)}"><div class="fp-booking-info">${b.people ? `<span class="fp-booking-order">${hasOrder(b) ? `Ordre de reservation · n° ${b.bookingOrder}` : 'Ordre a verifier'}</span>` : ''}<strong>${escape(b.name)}</strong>${b.people ? `<p class="fp-created-at">${escape(creationLabel(b))}</p>` : ''}${s.focusBooking === b.id ? '<p>Reservation selectionnee : choisissez ses tables puis enregistrez le plan.</p>' : ''}<p>Repas : ${escape(b.time)}${b.people ? ` · ${b.people} couverts` : ''}${b.status === 'pending' ? ' · A confirmer' : ''}</p><p>${a ? `${a.review ? 'A revoir : ' : 'Tables : '}${escape(labels)}` : 'Non placee'}${b.legacyTable ? ` · Ancienne note : ${escape(b.legacyTable)}` : ''}</p>${feedback ? `<p id="fp-placement-${escape(b.id)}" class="fp-placement-feedback" data-placement-feedback="${escape(b.id)}" data-error="${feedback.error}">${escape(feedback.message)}</p>` : ''}</div><div class="fp-actions">${b.people ? `<button type="button" data-open="${escape(b.id)}">Fiche</button><button type="button" data-place="${escape(b.id)}" ${feedback ? `aria-describedby="fp-placement-${escape(b.id)}"` : ''} ${!s.selected.size ? 'disabled' : ''}>${placedIds.has(b.id) ? 'Replacer' : 'Placer'}</button>` : ''}${a ? `<button type="button" data-unplace="${escape(b.id)}">Retirer du plan</button>` : ''}</div></article>`;
       }).join('') || '<p class="staff-muted">Aucune reservation pour ce service. Le plan ne cree aucune reservation.</p>');
     }
     function move(dx, dy) {
@@ -349,6 +366,10 @@
       const c = e.target.dataset.control;
       if (!c || s.busy || s.confirming) return;
       const value = e.target.value;
+      if (c === 'order') {
+        if (!['booking', 'time'].includes(value)) return;
+        s.order = value; bookings(); return;
+      }
       if ((c === 'date' || c === 'service') && s[c] === value) return;
       if (!await discard()) { render(); return; }
       if (c === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) { render(); return; }
@@ -402,7 +423,7 @@
         s.data.assignments = s.data.assignments.filter(a => a.reservationId !== b.id);
         s.data.assignments.push({ reservationId: b.id, tableIds: tables.map(t => t.id), fingerprint: b.fingerprint });
         s.selected.clear();
-        s.focusBooking = [...s.data.bookings].sort((a, b) => a.time.localeCompare(b.time)).find(b => !s.data.assignments.some(a => a.reservationId === b.id))?.id || null;
+        s.focusBooking = orderedBookings(s.data.bookings, s.order).find(b => !s.data.assignments.some(a => a.reservationId === b.id))?.id || null;
         mark(); status(`${b.name} : tables ${tables.map(t => t.name).join(' + ')} attribuees dans le brouillon. Choisissez les tables du prochain groupe, puis enregistrez le plan.`);
         render(); return;
       }
@@ -483,5 +504,5 @@
   window.addEventListener('beforeunload', e => {
     for (const root of document.querySelectorAll('[data-floor-plan]')) if (instances.get(root)?.dirty || instances.get(root)?.editDirty || instances.get(root)?.adding) { e.preventDefault(); e.returnValue = ''; break; }
   });
-  window.FloorPlan = { mount, canLeave, tableLabel, annotate, watch, dateOf, serviceOf };
+  window.FloorPlan = { mount, canLeave, tableLabel, annotate, watch, dateOf, serviceOf, orderedBookings, creationLabel };
 })();

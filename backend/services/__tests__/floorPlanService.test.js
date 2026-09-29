@@ -112,3 +112,63 @@ test('duplicate labels and table IDs are rejected', () => {
 test('template cannot carry bookings', async () => {
   await expect(service.save(service.context(null, null, true), payload([table()], [assignment()]))).rejects.toThrow('plan type');
 });
+
+test('placement priority follows booking creation, not meal time or confirmation', async () => {
+  records[0].createdAt = new Date('2026-09-28T10:00:00Z');
+  records.push({ ...records[0], _id: 'r2', time: '13:30', status: 'pending', createdAt: '2026-09-20T10:00:00Z' });
+  const before = JSON.stringify(records);
+  const data = await service.get(ctx);
+  expect(data.bookings.map(b => [b.id, b.bookingOrder])).toEqual([['r2', 1], ['r1', 2]]);
+  expect(data.bookings[0].createdAt).toBe('2026-09-20T10:00:00.000Z');
+  expect(JSON.stringify(records)).toBe(before);
+});
+
+test('equal creation timestamps share priority and have deterministic display order', async () => {
+  records[0].createdAt = '2026-09-20T10:00:00Z';
+  records.unshift({ ...records[0], _id: 'r2' });
+  records.push({ ...records[0], _id: 'r3', createdAt: '2026-09-21T10:00:00Z' });
+  expect((await service.get(ctx)).bookings.map(b => [b.id, b.bookingOrder])).toEqual([['r1', 1], ['r2', 1], ['r3', 3]]);
+});
+
+test.each([undefined, null, '', 'invalid'])('legacy date %s remains unknown without a fabricated rank', async createdAt => {
+  records[0].createdAt = createdAt;
+  records[0].updatedAt = '2026-09-01T10:00:00Z';
+  records.push({ ...records[0], _id: 'r2', createdAt: '2026-09-28T10:00:00Z' });
+  const data = await service.get(ctx);
+  expect(data.bookings.map(b => [b.id, b.bookingOrder])).toEqual([['r2', 1], ['r1', null]]);
+  expect(data.bookings[1].createdAt).toBeNull();
+});
+
+test('priority is scoped to the service and excludes cancelled and unpaid bookings', async () => {
+  records[0].createdAt = '2026-09-28T10:00:00Z';
+  for (const [id, patch] of Object.entries({
+    evening: { time: '19:00' }, cancelled: { status: 'cancelled' },
+    awaiting: { status: 'awaiting-payment' }, unpaid: { deposit: { required: true, status: 'awaiting' } }
+  })) records.push({ ...records[0], _id: id, createdAt: '2026-09-01T10:00:00Z', ...patch });
+  expect((await service.get(ctx)).bookings.map(b => [b.id, b.bookingOrder])).toEqual([['r1', 1]]);
+  expect((await service.get(service.context('2026-09-30', 'soir'))).bookings.map(b => [b.id, b.bookingOrder])).toEqual([['evening', 1]]);
+});
+
+test('sorting priority never changes assignments, reservations, deposits or their fingerprints', async () => {
+  records[0].deposit = { required: true, status: 'paid', paidAt: '2026-09-20T11:00:00Z', amount: 2000 };
+  const before = JSON.stringify(records);
+  const a = assignment();
+  await service.save(ctx, payload([table()], [a]));
+  expect(JSON.stringify(records)).toBe(before);
+  records[0].createdAt = '2026-09-20T10:00:00Z';
+  records.push({ ...records[0], _id: 'r2', time: '13:30', createdAt: '2026-09-01T10:00:00Z' });
+  const data = await service.get(ctx);
+  expect(data.bookings.map(b => b.id)).toEqual(['r2', 'r1']);
+  expect(data.assignments).toEqual([{ ...a, review: false }]);
+  expect(data.bookings.find(b => b.id === 'r1').fingerprint).toBe(a.fingerprint);
+});
+
+test('staff updates keep original creation priority; no new arrival tracking is introduced', async () => {
+  records[0].createdAt = '2026-09-01T10:00:00Z';
+  records.push({ ...records[0], _id: 'r2', createdAt: '2026-09-20T10:00:00Z' });
+  records[0].updatedAt = '2026-09-29T10:00:00Z';
+  records[0].time = '13:45';
+  records[0].status = 'pending';
+  expect((await service.get(ctx)).bookings.map(b => [b.id, b.bookingOrder])).toEqual([['r1', 1], ['r2', 2]]);
+  expect(records[0].arrivedAt).toBeUndefined();
+});

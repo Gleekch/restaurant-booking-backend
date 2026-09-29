@@ -43,3 +43,42 @@ test('table labels and reservation IDs cannot inject HTML', async () => {
   await api.annotate(root, [row()], async () => response('<img src=x>'));
   expect(nodes[0].textContent).toBe('Tables : <img src=x>'); expect(nodes[0].innerHTML).toBeUndefined();
 });
+
+test('cards and details display the service booking priority beside assigned tables', async () => {
+  const { api, nodes, root } = fixture();
+  const result = response('20');
+  result.data.bookings = [{ id: 'r1', bookingOrder: 2 }];
+  await api.annotate(root, [row()], async () => result);
+  expect(nodes[0].textContent).toBe('Tables : 20 · Ordre de reservation : n° 2');
+});
+
+test('unplaced bookings also show priority without inventing an assigned table', async () => {
+  const { api, nodes, root } = fixture();
+  const result = response();
+  result.data.assignments = [];
+  result.data.bookings = [{ id: 'r1', bookingOrder: 1 }];
+  await api.annotate(root, [row()], async () => result);
+  expect(nodes[0].textContent).toBe('Table a attribuer · Ordre de reservation : n° 1');
+});
+
+test('list defaults to creation priority and can switch to meal time without changing ranks', () => {
+  const { api } = fixture();
+  const rows = [{ id: 'late', time: '12:00', bookingOrder: 2 }, { id: 'early', time: '13:30', bookingOrder: 1 }, { id: 'legacy', time: '12:15', bookingOrder: null }];
+  const before = JSON.stringify(rows);
+  expect(api.orderedBookings(rows).map(b => b.id)).toEqual(['early', 'late', 'legacy']);
+  expect(api.orderedBookings(rows, 'time').map(b => b.id)).toEqual(['late', 'legacy', 'early']);
+  expect(JSON.stringify(rows)).toBe(before);
+});
+
+test('ties and unknown dates have stable ordering independent of API array order', () => {
+  const { api } = fixture();
+  const rows = [{ id: 'r3', bookingOrder: null }, { id: 'r2', bookingOrder: 1 }, { id: 'r1', bookingOrder: 1 }];
+  expect(api.orderedBookings(rows).map(b => b.id)).toEqual(['r1', 'r2', 'r3']);
+});
+
+test('creation dates use Reunion time rather than the device timezone', () => {
+  const { api } = fixture();
+  expect(api.creationLabel({ createdAt: '2026-09-28T22:30:00Z' })).toMatch(/29\/09\/2026.*02:30.*Reunion/);
+  expect(api.creationLabel({ createdAt: null })).toMatch(/inconnue/);
+  expect(api.creationLabel({ createdAt: 'invalid' })).toMatch(/inconnue/);
+});

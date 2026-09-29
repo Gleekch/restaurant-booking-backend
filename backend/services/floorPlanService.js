@@ -47,9 +47,26 @@ const fingerprint = booking => crypto.createHash('sha256').update(JSON.stringify
 async function bookingsFor(ctx) {
   if (ctx.template) return [];
   const all = await Reservation.find({ date: { $gte: ctx.start, $lt: ctx.end }, status: { $nin: ['awaiting-payment', 'cancelled'] } })
-    .select('_id customerName date time numberOfPeople status table deposit.required deposit.status deposit.paidAt').lean();
+    .select('_id customerName date time numberOfPeople status table createdAt deposit.required deposit.status deposit.paidAt').lean();
   return all.filter(r => (timeToMinutes(r.time) < 900 ? 'midi' : 'soir') === ctx.service
     && !(r.deposit?.required && !r.deposit.paidAt && ['awaiting', 'failed'].includes(r.deposit.status)));
+}
+function orderedBookings(bookings) {
+  const rows = bookings.map(r => {
+    // Never manufacture a booking date from updatedAt or an ObjectId on legacy records.
+    const created = r.createdAt ? new Date(r.createdAt) : null;
+    const createdAt = created && Number.isFinite(created.getTime()) ? created.toISOString() : null;
+    return { id: String(r._id), name: r.customerName, time: r.time, people: r.numberOfPeople,
+      status: r.status, legacyTable: r.table || null, fingerprint: fingerprint(r), createdAt, bookingOrder: null };
+  }).sort((a, b) => (a.createdAt || 'z').localeCompare(b.createdAt || 'z') || a.id.localeCompare(b.id));
+  let previous = null, rank = 0;
+  rows.forEach((row, index) => {
+    if (!row.createdAt) return;
+    if (row.createdAt !== previous) rank = index + 1;
+    row.bookingOrder = rank;
+    previous = row.createdAt;
+  });
+  return rows;
 }
 function decorate(doc, ctx, bookings, inherited = false) {
   const assignments = (doc.assignments || []).map(assignment => {
@@ -60,7 +77,7 @@ function decorate(doc, ctx, bookings, inherited = false) {
   return { key: ctx.key, revision: doc.revision || 0, inherited, layout: doc.layout, assignments, tableCatalog,
     updatedAt: doc.updatedAt || null,
     closed: !ctx.template && isOnlineBookingClosedTime(ctx.date, ctx.service === 'midi' ? '12:00' : '19:00'),
-    bookings: bookings.map(r => ({ id: String(r._id), name: r.customerName, time: r.time, people: r.numberOfPeople, status: r.status, legacyTable: r.table || null, fingerprint: fingerprint(r) })) };
+    bookings: orderedBookings(bookings) };
 }
 async function get(ctx) {
   const existing = await FloorPlan.findById(ctx.key).lean();
