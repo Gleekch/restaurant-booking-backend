@@ -160,7 +160,7 @@ function getServiceName(timeInMinutes) {
 
 function buildServiceHoursMessage(bounds) {
   const midiLimit = bounds.isMidiExtended ? '14h00' : '13h45';
-  const soirLimit = bounds.isSoirWeekend ? '22h00' : '21h30';
+  const soirLimit = '21h30';
 
   return `Les reservations sont possibles de 12h00 a ${midiLimit} (midi) ou de 18h00 a ${soirLimit} (soir)`;
 }
@@ -465,6 +465,7 @@ router.post('/', async (req, res) => {
 });
 
 router.get('/availability', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
   try {
     const { date, people } = req.query;
 

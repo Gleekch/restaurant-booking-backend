@@ -109,20 +109,26 @@ function getLoadClass(totalCovers, limit = ONLINE_CAPACITY_LIMIT) {
 }
 
 async function updateRecommendedHours(selectedDate) {
+    const nodes = ['midi', 'soir'].map(service => document.getElementById(`wave-recommended-${service}`));
+    const request = {};
+    nodes.filter(Boolean).forEach(node => { node.__recommendationRequest = request; node.textContent = ''; });
+    const current = node => node?.isConnected && node.__recommendationRequest === request;
     try {
         const data = await api.getAvailability(selectedDate, 2);
-        if (!data?.success || !data.data?.meta?.recommendationsEnabled) return;
-        const midiRec = (data.data.midi || []).find(s => s.status === 'recommended');
-        const soirRec = (data.data.soir || []).find(s => s.status === 'recommended');
-        if (midiRec) {
-            const el = document.getElementById('wave-recommended-midi');
-            if (el) el.textContent = `Horaire conseillé : ${midiRec.time}`;
-        }
-        if (soirRec) {
-            const el = document.getElementById('wave-recommended-soir');
-            if (el) el.textContent = `Horaire conseillé : ${soirRec.time}`;
-        }
-    } catch (_) { /* silently ignore if API unavailable */ }
+        if (!data?.success) throw new Error('Availability unavailable');
+        if (!data.data?.meta?.recommendationsEnabled) return;
+        const recommended = slots => slots.filter(s => s.available && s.status === 'recommended'
+            && /^\d{2}:\d{2}$/.test(s.time));
+        const midi = recommended(data.data.midi || []).map(s => s.time).join(', ');
+        const soir = recommended(data.data.soir || []).filter(s => s.time >= '18:00' && s.time <= '21:30');
+        const tapas = soir.filter(s => s.time < '19:00').map(s => s.time).join(', ');
+        const dinner = soir.filter(s => s.time >= '19:00').map(s => s.time).join(', ');
+        if (current(nodes[0]) && midi) nodes[0].textContent = `Conseils pour 2 personnes : ${midi}`;
+        if (current(nodes[1]) && (tapas || dinner)) nodes[1].textContent = 'Conseils pour 2 personnes : '
+            + [tapas && `Tapas ${tapas}`, dinner && `Dîner ${dinner}`].filter(Boolean).join(' ; ');
+    } catch (_) {
+        nodes.filter(current).forEach(node => { node.textContent = 'Conseils horaires indisponibles.'; });
+    }
 }
 
 function getSelectedDateValue() {
@@ -1223,10 +1229,9 @@ function renderOperationalDayView() {
     const selectedDateObj = parseDateInput(selectedDate);
     const dayOfWeek = selectedDateObj.getDay();
     const isMidiExtended = dayOfWeek === 5 || dayOfWeek === 6 || dayOfWeek === 0;
-    const isSoirWeekend = dayOfWeek === 6;
 
     const midiEndStr = isMidiExtended ? '14h00' : '13h45';
-    const soirEndStr = isSoirWeekend ? '22h00' : '21h30';
+    const soirEndStr = '21h30';
 
     const showMidi = currentServiceFilter === 'all' || currentServiceFilter === 'midi';
     const showSoir = currentServiceFilter === 'all' || currentServiceFilter === 'soir';

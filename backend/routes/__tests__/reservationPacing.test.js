@@ -60,6 +60,31 @@ test('the new client request and restaurant acceptance cannot bypass rolling pac
   expect(r.deposit.amountCents).toBe(6000);
 });
 
+test.each([['/', '21:45'], ['/', '22:00'], ['/desktop', '21:45'], ['/desktop', '22:00']])(
+  'new Saturday reservations cannot bypass 21:30 through %s at %s', async (path, time) => {
+    const res = response();
+    await handler(router, path, 'post')({ body: { ...body(), date: '2026-10-03', time }, get: () => undefined, headers: {} }, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('21h30') }));
+    expect(Reservation.findOneAndUpdate).not.toHaveBeenCalled();
+  }
+);
+
+test('staff may still edit contact details on an existing late booking but not move a booking after 21:30', async () => {
+  const r = { _id: '000000000000000000000023', ...body(), date: new Date('2026-10-03'), time: '22:00',
+    status: 'confirmed', source: 'desktop', deposit: { required: false, status: 'none' } };
+  Reservation.findById.mockResolvedValue(r);
+  Reservation.findOneAndUpdate.mockResolvedValue({ ...r, phoneNumber: '0262000001' });
+  const res = response();
+  await handler(router, '/:id', 'put')({ params: { id: r._id }, body: { phoneNumber: '0262000001' }, app: { get: () => ({ emit: jest.fn() }) } }, res);
+  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+  Reservation.findOneAndUpdate.mockClear(); r.time = '21:00';
+  const refused = response();
+  await handler(router, '/:id', 'put')({ params: { id: r._id }, body: { time: '21:45' } }, refused);
+  expect(refused.status).toHaveBeenCalledWith(400);
+  expect(Reservation.findOneAndUpdate).not.toHaveBeenCalled();
+});
+
 test.each([['2026-10-04', '19:00'], ['2026-10-05', '12:30'], ['2026-10-06', '12:30']])(
   'closed slots remain blocked before reading capacity: %s %s', async (date, time) => {
     const res = response();

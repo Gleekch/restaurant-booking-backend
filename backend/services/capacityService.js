@@ -171,8 +171,12 @@ async function checkAvailability(date, time, numberOfPeople, limit, excludeId, s
   }
 
   const effectiveLimit = Math.min(limit || CAPACITY, CAPACITY);
-  const { occupancy, arrivals, arrivalMinutes } = await getOccupancyMap(date, excludeId, session);
   const startMin = timeToMinutes(time);
+  if (startMin > getServiceBounds(date).soirEnd) {
+    return { available: false, reason: 'after-last-arrival',
+      message: 'Derniere arrivee a 21h30 pour tous les services du soir, samedi compris.' };
+  }
+  const { occupancy, arrivals, arrivalMinutes } = await getOccupancyMap(date, excludeId, session);
 
   const arrivalLoad = getArrivalWindowLoad(startMin, requestedPeople, arrivalMinutes);
   if (arrivalLoad.peakCovers > ARRIVAL_WINDOW_MAX_COVERS) {
@@ -235,7 +239,7 @@ function getServiceBounds(date) {
     midiStart: 720,                              // 12:00
     midiEnd: isMidiExtended ? 840 : 825,         // 14:00 ou 13:45
     soirStart: 1080,                             // 18:00
-    soirEnd: isSoirWeekend ? 1320 : 1290,        // 22:00 ou 21:30
+    soirEnd: 1290,                             // 21:30, samedi compris
     midiWaveCutoff: isMidiExtended ? 780 : 765,  // 13:00 ou 12:45
     soirWaveCutoff: isSoirWeekend ? 1200 : 1185  // 20:00 ou 19:45
   };

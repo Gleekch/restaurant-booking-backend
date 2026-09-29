@@ -23,8 +23,13 @@
 .service-rhythm .rhythm-note { margin: 7px 0; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
 .service-rhythm .rhythm-closed { padding: 8px; font-size: 11px; line-height: 1.5; color: var(--warning-text); background: var(--warning-bg); border-radius: var(--radius-sm); }
 .rhythm-retry { min-height: 44px; }
+.rhythm-tapas { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr auto; column-gap: 12px; }
+.rhythm-tapas .rhythm-covers { grid-column: 2; grid-row: 1 / span 3; margin: 0; align-self: center; }
+.rhythm-tapas .rhythm-pressure { grid-column: 1; margin-top: 4px; }
+.rhythm-tapas .rhythm-track, .rhythm-tapas .rhythm-state { grid-column: 1 / -1; }
+.service-rhythm[data-rhythm-service="soir"] .rhythm-waves { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 540px) {
-    .rhythm-waves { grid-template-columns: 1fr; }
+    .rhythm-waves, .service-rhythm[data-rhythm-service="soir"] .rhythm-waves { grid-template-columns: 1fr; }
     .rhythm-wave { display: grid; grid-template-columns: 1fr auto; column-gap: 14px; }
     .rhythm-covers { grid-column: 2; grid-row: 1 / span 2; margin: 0; align-self: center; }
     .rhythm-pressure, .rhythm-track, .rhythm-state { grid-column: 1 / -1; }

@@ -57,8 +57,30 @@ test('weekend end times are retained and out-of-wave bookings are explicit', asy
   records = [booking('11:45', 4), booking('14:00', 6)];
   const data = await getServiceRhythm('2026-10-03');
   expect(data.services.midi.waves.at(-1).end).toBe('14:00');
-  expect(data.services.soir.waves.at(-1).end).toBe('22:00');
+  expect(data.services.soir.waves.at(-1).end).toBe('21:30');
   expect(data.services.midi.outsideWaves).toBe(4);
+});
+
+test.each(['2026-09-30', '2026-10-03'])('tapas then three dinner waves are unambiguous on %s', async date => {
+  records = ['18:00', '18:45', '19:00', '19:45', '20:00', '20:45', '21:00', '21:30', '21:45', '22:00'].map(time => booking(time, 2));
+  const data = await getServiceRhythm(date);
+  expect(data.services.soir.waves.map(w => [w.id, w.start, w.end, w.covers])).toEqual([
+    ['soir-tapas', '18:00', '19:00', 4], ['soir-1', '19:00', '19:45', 4],
+    ['soir-2', '20:00', '20:45', 4], ['soir-3', '21:00', '21:30', 4]
+  ]);
+  expect(data.services.soir.waves[0].endExclusive).toBe(true);
+  expect(data.services.soir.totalCovers).toBe(20);
+  expect(data.services.soir.outsideWaves).toBe(4);
+  expect(data.services.soir.provisional).toBe(false);
+});
+
+test('evening pressure includes holds and neighboring waves but excludes cancellations', async () => {
+  records = [booking('19:45', 12), booking('20:00', 9, 'awaiting-payment'), booking('20:00', 99, 'cancelled')];
+  const { services } = await getServiceRhythm('2026-10-03');
+  expect(services.soir.paymentHolds).toBe(9);
+  expect(services.soir.totalCovers).toBe(21);
+  expect(services.soir.waves.find(w => w.id === 'soir-1').peak30).toBe(21);
+  expect(services.soir.waves.find(w => w.id === 'soir-2').peak30).toBe(21);
 });
 
 test('a database failure is not converted into an empty service', async () => {

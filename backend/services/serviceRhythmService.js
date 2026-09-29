@@ -1,12 +1,9 @@
 const BlockedService = require('../models/BlockedService');
+const { getServiceWaves } = require('./serviceWaveService');
 const { parseDateInput, timeToMinutes, getServiceBounds, getOccupancyMap, getArrivalWindowLoad,
   isOnlineBookingClosedTime, ARRIVAL_WINDOW_MINUTES, ARRIVAL_WINDOW_MAX_COVERS } = require('./capacityService');
 
 const clock = minute => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
-function definitions(bounds, service) {
-  if (service === 'midi') return [[720, 765], [765, 795], [795, bounds.midiEnd + 1]];
-  return [[bounds.soirStart, bounds.soirWaveCutoff], [bounds.soirWaveCutoff, bounds.soirEnd + 1]];
-}
 function peak(start, end, arrivals) {
   let maximum = 0;
   for (let minute = start; minute < end; minute++) {
@@ -24,10 +21,10 @@ async function getServiceRhythm(date) {
   const services = {};
   for (const service of ['midi', 'soir']) {
     const rows = reservations.filter(r => (timeToMinutes(r.time) < 900 ? 'midi' : 'soir') === service);
-    const waves = definitions(bounds, service).map(([from, to], index) => {
+    const waves = getServiceWaves(bounds, service).map(({ from, to, id, label, kind, endExclusive }) => {
       const bookings = rows.filter(r => timeToMinutes(r.time) >= from && timeToMinutes(r.time) < to);
-      return { id: `${service}-${index + 1}`, label: `Vague ${index + 1}`, start: clock(from),
-        end: clock(Math.floor((to - 1) / 15) * 15), covers: bookings.reduce((sum, r) => sum + r.numberOfPeople, 0),
+      return { id, label, kind, start: clock(from), endExclusive: Boolean(endExclusive),
+        end: clock(endExclusive ? to : Math.floor((to - 1) / 15) * 15), covers: bookings.reduce((sum, r) => sum + r.numberOfPeople, 0),
         reservations: bookings.length, peak30: peak(from, to, arrivalMinutes) };
     });
     const weeklyClosed = isOnlineBookingClosedTime(date, service === 'midi' ? '12:00' : '19:00');

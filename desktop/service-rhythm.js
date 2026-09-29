@@ -12,8 +12,8 @@
         return `<div class="rhythm-heading"><h4>Vagues d'arriv\u00e9e</h4><span class="rhythm-limit">${data.limit} couverts / ${data.windowMinutes} min</span></div>
             ${view.provisional ? '<p class="rhythm-note">D\u00e9coupage midi propos\u00e9, \u00e0 confirmer.</p>' : ''}
             ${view.closed ? `<p class="rhythm-closed">${view.closure === 'weekly' ? 'Fermeture aux r\u00e9servations en ligne' : 'Service bloqu\u00e9 en ligne'} : les r\u00e9servations existantes restent visibles.</p>` : ''}
-            <div class="rhythm-waves">${view.waves.map(wave => `<div class="rhythm-wave rhythm-${tone(wave.peak30, data.limit)}" data-wave-id="${escape(wave.id)}">
-                <div class="rhythm-wave-name">${escape(wave.label)}</div><div class="rhythm-hours">${escape(wave.start)} &ndash; ${escape(wave.end)}</div>
+            <div class="rhythm-waves">${view.waves.map(wave => `<div class="rhythm-wave rhythm-${tone(wave.peak30, data.limit)}${wave.kind === 'tapas' ? ' rhythm-tapas' : ''}" data-wave-id="${escape(wave.id)}">
+                <div class="rhythm-wave-name">${escape(wave.label)}</div><div class="rhythm-hours">${escape(wave.start)} &ndash; ${wave.endExclusive ? 'avant ' : ''}${escape(wave.end)}</div>
                 <div class="rhythm-covers"><strong>${wave.covers}</strong> <span>couverts</span></div>
                 <div class="rhythm-pressure">Pic 30 min : <strong>${wave.peak30}</strong> / ${data.limit}</div>
                 <div class="rhythm-track" aria-hidden="true"><span style="width:${Math.min(100, wave.peak30 / data.limit * 100)}%"></span></div>

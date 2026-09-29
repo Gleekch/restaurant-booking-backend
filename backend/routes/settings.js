@@ -92,7 +92,7 @@ router.post('/availability', async (req, res) => {
     const isSoir = timeMin >= bounds.soirStart && timeMin <= bounds.soirEnd;
     if (!isMidi && !isSoir) {
       const midiLimit = bounds.isMidiExtended ? '14h00' : '13h45';
-      const soirLimit = bounds.isSoirWeekend ? '22h00' : '21h30';
+      const soirLimit = '21h30';
       return res.json({
         success: false,
         available: false,

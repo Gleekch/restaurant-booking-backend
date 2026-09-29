@@ -64,13 +64,30 @@ test('availability and save agree on 30-minute pressure and exclude the edited b
   expect((await checkAvailability('2026-09-30', '12:15', 8, 50, id)).available).toBe(false);
 });
 
-test('Wednesday and Thursday include 13:45; weekend hours and Sunday evening closure stay intact', async () => {
+test('Wednesday and Thursday include 13:45; weekend lunch and Sunday evening closure stay intact', async () => {
   Reservation.find.mockResolvedValue([]);
   for (const date of ['2026-09-30', '2026-10-01']) {
     expect(getServiceBounds(date).midiEnd).toBe(825);
     expect((await getAvailableSlots(date, 2, 50)).midi.at(-1)).toEqual({ time: '13:45', available: true });
   }
   expect(getServiceBounds('2026-10-02').midiEnd).toBe(840);
-  expect(getServiceBounds('2026-10-03').soirEnd).toBe(1320);
+  expect(getServiceBounds('2026-10-03').soirEnd).toBe(1290);
   expect((await getAvailableSlots('2026-10-04', 2, 50)).soir).toEqual([]);
 });
+
+test.each(['2026-09-30', '2026-10-01', '2026-10-02', '2026-10-03'])('last arrival is 21:30, including Saturday: %s', async date => {
+  Reservation.find.mockResolvedValue([]);
+  expect((await getAvailableSlots(date, 2, 50)).soir.at(-1)).toEqual({ time: '21:30', available: true });
+  expect((await checkAvailability(date, '21:30', 2, CAPACITY)).available).toBe(true);
+  for (const time of ['21:31', '21:45', '22:00']) {
+    expect(await checkAvailability(date, time, 2, CAPACITY)).toEqual(expect.objectContaining({ available: false, reason: 'after-last-arrival' }));
+  }
+});
+
+test.each([['18:45', '19:00'], ['19:45', '20:00'], ['20:45', '21:00']])(
+  'the 20-cover ceiling never resets between evening periods: %s / %s', async (first, next) => {
+    Reservation.find.mockResolvedValue([{ time: first, numberOfPeople: 12 }]);
+    expect((await checkAvailability('2026-10-03', next, 8, CAPACITY)).available).toBe(true);
+    expect((await checkAvailability('2026-10-03', next, 9, CAPACITY)).reason).toBe('arrival-window-full');
+  }
+);
