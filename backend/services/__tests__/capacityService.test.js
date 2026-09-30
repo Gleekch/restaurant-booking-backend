@@ -2,7 +2,12 @@ jest.mock('../../models/Reservation', () => ({ find: jest.fn() }));
 const Reservation = require('../../models/Reservation');
 const { checkAvailability, getAvailableSlots, parseDateInput, getServiceBounds, CAPACITY } = require('../capacityService');
 
-beforeEach(() => jest.clearAllMocks());
+beforeEach(() => {
+  jest.clearAllMocks();
+  // Keep the service fixtures in the future regardless of the test execution date.
+  jest.useFakeTimers().setSystemTime(new Date('2026-09-29T00:00:00Z'));
+});
+afterEach(() => jest.useRealTimers());
 test('off-grid staff bookings occupy real time, not a different grid', async () => {
   Reservation.find.mockResolvedValue([{ time: '19:05', numberOfPeople: CAPACITY }]);
   expect((await checkAvailability('2026-10-07', '19:00', 1, CAPACITY)).available).toBe(false);

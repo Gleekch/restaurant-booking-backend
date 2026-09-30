@@ -38,7 +38,38 @@ existing assignment is moved automatically.
   placements, persistence, authentication, logout and disabled financial actions.
   Evidence: audit-artifacts/portable-ui-release-EUsMud/summary.json in the workspace.
   Build uses physical node_modules; the initial junction-based build omitted
-  transitive dependencies and was replaced, not distributed.
+  transitive dependencies and was replaced. A user screenshot subsequently
+  reported the same missing engine.io-client startup error under the UI.13 path.
+
+## Desktop packaging follow-up (2026-09-30)
+
+Distinct local candidate 2.4.3-ui.14, with physical node_modules and no dependency
+version changes. Older release folders are preserved. No production deployment.
+
+The afterPack gate now checks first-party startup files and the complete
+mandatory socket.io-client dependency tree inside app.asar, including package
+entry points and nested/hoisted resolution. It never resolves missing modules
+from the development machine. Existing private-file checks remain enabled.
+Nine regression tests cover the previously missing engine.io-client and parser,
+missing entry files, optional dependencies, cycles and Windows paths.
+
+Capacity test fixtures now use a fixed test clock so today's elapsed lunch slots
+do not cause false failures. No availability business rule was changed.
+
+- 388 Jest tests / 43 suites passed on September 30.
+  Evidence: audit-artifacts/desktop-packaging-release-jest-20260930.json.
+- Actual UI.14 Windows binary: 22 checks passed, including startup, authentication,
+  reconnect, floor plans, booking priority, placement, deletion and finance guards.
+  Evidence: audit-artifacts/portable-ui-release-hN5GwZ/summary.json.
+  Tests use synthetic loopback data; productionTouched is false.
+- app.asar SHA256:
+  3253EE9CBBEFD1F0801B8DACFF4C866731D48E397E8DAA971871495E403509DE
+
+Output: releases/2.4.3-ui.14/win-unpacked in the workspace. This is an unpacked
+application: keep its complete folder, not the EXE alone. The matching backend
+release still needs deployment before the new staff features can be used live.
+The September 29 backup remains historical evidence, not a fresh September 30
+snapshot. Deposits must remain disabled; no production records were modified.
 
 ## Release prerequisites
 
