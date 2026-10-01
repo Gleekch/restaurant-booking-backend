@@ -12,6 +12,8 @@ function safeReservationId(value) {
 const API_URL = window.location.origin;
 let reservations = [];
 let currentView = 'today';
+let detailView = null;
+let viewRenderSequence = 0;
 let blockedServicesCache = []; // services bloqués pour la date affichée
 let createInFlight = false;
 let editInFlight = false;
@@ -71,6 +73,7 @@ function initNavigation() {
             document.querySelectorAll('.rail-item').forEach(i => i.classList.remove('active'));
             item.classList.add('active');
             currentView = view;
+            detailView = null;
             renderView();
         });
     });
@@ -95,6 +98,7 @@ async function loadReservations() {
         }
         updateConnectionStatus(true);
         updatePendingBadge();
+        window.ServiceRelease?.refreshFinancePanel(document.getElementById('modal-body'), reservations);
         renderView();
     } catch (error) {
         console.error('Erreur chargement:', error);
@@ -141,6 +145,7 @@ function updatePendingBadge() {
 
 // Render Current View
 function renderView() {
+    viewRenderSequence++;
     window.ReservationChanges?.updateQueue(reservations, showReservationDetail);
     switch (currentView) {
         case 'floor-plan': {
@@ -167,10 +172,12 @@ function renderView() {
             renderPendingView();
             break;
         case 'week':
-            renderWeekView();
+            if (detailView?.parent === 'week') showDayServiceDetail(detailView.date, detailView.service);
+            else renderWeekView();
             break;
         case 'month':
-            renderMonthView();
+            if (detailView?.parent === 'month') showDayDetail(detailView.date);
+            else renderMonthView();
             break;
         default:
             renderTodayView();
@@ -179,6 +186,7 @@ function renderView() {
 
 // Render Today View (ou prochaine date avec des réservations si aujourd'hui est vide)
 async function renderTodayView() {
+    const sequence = ++viewRenderSequence;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     let displayDate = today;
@@ -216,9 +224,9 @@ async function renderTodayView() {
     const midiCovers = midi.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const soirCovers = soir.reduce((sum, r) => sum + r.numberOfPeople, 0);
     const dateISO = displayDate.getFullYear() + '-' + String(displayDate.getMonth()+1).padStart(2,'0') + '-' + String(displayDate.getDate()).padStart(2,'0');
-    await loadBlockedServices(dateISO);
+    await loadBlockedServices(dateISO, () => sequence === viewRenderSequence);
 
-    if (currentView !== 'today') return;
+    if (currentView !== 'today' || sequence !== viewRenderSequence) return;
 
     content.innerHTML = `
         <div class="summary-card">
@@ -311,6 +319,8 @@ function renderPendingView() {
 
 // Render Week View
 function renderWeekView() {
+    detailView = null;
+    viewRenderSequence++;
     const today = new Date();
     const weekDays = [];
 
@@ -343,6 +353,8 @@ let currentMonthDate = new Date();
 
 // Render Month View
 function renderMonthView() {
+    detailView = null;
+    viewRenderSequence++;
     const firstDay = new Date(currentMonthDate.getFullYear(), currentMonthDate.getMonth(), 1);
     const firstGridDay = new Date(firstDay);
     const firstGridWeekDay = firstGridDay.getDay() || 7;
@@ -419,9 +431,12 @@ function renderMonthView() {
 
 // Show day detail from month view
 async function showDayDetail(dateISO) {
+    if (currentView !== 'month') return;
+    detailView = { parent: 'month', date: dateISO };
+    const sequence = ++viewRenderSequence;
     const originatingView = currentView;
-    await loadBlockedServices(dateISO);
-    if (currentView !== originatingView) return;
+    await loadBlockedServices(dateISO, () => sequence === viewRenderSequence);
+    if (currentView !== originatingView || sequence !== viewRenderSequence) return;
     const [y, m, d] = dateISO.split('-').map(Number);
     const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
@@ -628,9 +643,12 @@ function renderDayCard(day) {
 
 // Show Day Service Detail
 async function showDayServiceDetail(dateISO, service) {
+    if (currentView !== 'week') return;
+    detailView = { parent: 'week', date: dateISO, service };
+    const sequence = ++viewRenderSequence;
     const originatingView = currentView;
-    await loadBlockedServices(dateISO);
-    if (currentView !== originatingView) return;
+    await loadBlockedServices(dateISO, () => sequence === viewRenderSequence);
+    if (currentView !== originatingView || sequence !== viewRenderSequence) return;
     const [y, m, d] = dateISO.split('-').map(Number);
     const date = new Date(y, m - 1, d);
     const dayReservations = reservations.filter(r =>
@@ -716,25 +734,6 @@ function showReservationDetail(r) {
     const dateStr = date.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const statusText = STATUS_TEXT;
 
-    // Libellé des arrhes pour la fiche détail
-    const depositLabels = {
-        awaiting: 'En attente de paiement',
-        paid: 'Payées',
-        refund_pending: 'Remboursement en cours',
-        refund_failed: 'Remboursement echoue - verification necessaire',
-        refund_review: 'Remboursement a verifier dans Stripe',
-        deducted: 'Déduites de l\'addition',
-        refunded: 'Remboursées',
-        failed: 'Non abouti'
-    };
-    const d = r.deposit;
-    const depositRow = (d && d.required) ? `
-            <div class="detail-row">
-                <span class="detail-label">Arrhes</span>
-                <span class="detail-value"><strong>${formatEuros(d.amountCents)}</strong> — ${escapeHtml(depositLabels[d.status] || d.status)}</span>
-            </div>
-    ` : '';
-
     document.getElementById('modal-title').textContent = r.customerName;
     const editButton = document.getElementById('edit-reservation-btn');
     editButton.hidden = false;
@@ -758,7 +757,6 @@ function showReservationDetail(r) {
                 <span class="detail-value">${escapeHtml(r.numberOfPeople)}</span>
             </div>
             <div class="detail-row"><span class="detail-label">Tables</span><span class="detail-value">${window.FloorPlan.tableLabel(r)}</span></div>
-            ${depositRow}
             <div class="detail-row">
                 <span class="detail-label">Téléphone</span>
                 <span class="detail-value"><a href="tel:${encodeURIComponent(r.phoneNumber)}">${escapeHtml(r.phoneNumber)}</a></span>
@@ -780,7 +778,7 @@ function showReservationDetail(r) {
         ${window.ReservationChanges?.panel(r) || ''}
         ${clientEmailNotice(r)}
         ${r.email && ['pending', 'confirmed', 'cancelled'].includes(r.status) ? '<button type="button" class="btn btn-secondary" id="retry-client-email">Renvoyer l\'email au client</button>' : ''}
-        ${window.ServiceRelease.financePanel()}
+        ${window.ServiceRelease.financePanel(r)}
         ${!['cancelled', 'awaiting-payment'].includes(r.status) ? '<button type="button" class="btn btn-secondary" id="assign-tables-btn">Attribuer / modifier les tables</button>' : ''}
         <div class="detail-actions">
             ${r.status !== 'confirmed' ? `
@@ -790,7 +788,7 @@ function showReservationDetail(r) {
                 <button class="btn btn-danger" onclick="updateStatus('${safeReservationId(r._id)}', 'cancelled'); closeModal();">Annuler</button>
             ` : ''}
             ${['pending','confirmed'].includes(r.status) ? `
-                <button class="btn btn-secondary" disabled data-unavailable aria-describedby="release-finance-note" title="Suivi d arrivee indisponible dans cette version">Client installé</button>
+                <button class="btn btn-secondary" disabled data-unavailable title="Suivi d arrivee indisponible dans cette version">Client installé</button>
                 <button class="btn btn-warning" onclick="markNoShow('${safeReservationId(r._id)}')">No-show</button>
             ` : ''}
             <button class="btn btn-secondary" onclick="closeModal()">Fermer</button>
@@ -1159,12 +1157,12 @@ document.querySelectorAll('.modal').forEach(modal => {
 });
 
 // Blocage manuel de service
-async function loadBlockedServices(date) {
+async function loadBlockedServices(date, isCurrent = () => true) {
     try {
         const res = await apiFetch(`${API_URL}/api/blocked-services?date=${date}`);
         const data = await res.json();
-        blockedServicesCache = (data.data || []).map(b => b.service);
-    } catch { blockedServicesCache = []; }
+        if (isCurrent()) blockedServicesCache = (data.data || []).map(b => b.service);
+    } catch { if (isCurrent()) blockedServicesCache = []; }
 }
 
 function isServiceBlocked(service) {

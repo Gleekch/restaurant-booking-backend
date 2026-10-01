@@ -1,6 +1,6 @@
 {
   "name": "au-murmure-des-flots",
-  "version": "2.4.3-ui.14",
+  "version": "2.4.3-ui.15",
   "engines": {
     "node": ">=22.12.0 <25"
   },

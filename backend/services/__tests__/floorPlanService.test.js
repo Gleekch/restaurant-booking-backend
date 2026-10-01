@@ -44,7 +44,21 @@ test('service snapshot stays independent of subsequent template changes', async 
   await service.save(ctx, payload());
   await service.save(service.context(null, null, true), { ...payload([table('T2')]), revision: 1 });
   expect((await service.get(ctx)).layout.tables[0].id).toBe('T1');
+  expect((await service.get(ctx)).templateRevision).toBeNull();
   expect((await service.get(service.context('2026-10-01', 'soir'))).layout.tables[0].id).toBe('T2');
+});
+
+test('inherited template freshness never becomes the service write revision', async () => {
+  expect(await service.get(ctx)).toMatchObject({ revision: 0, inherited: true, templateRevision: 0 });
+  await service.save(service.context(null, null, true), payload());
+  expect(await service.get(ctx)).toMatchObject({ revision: 0, templateRevision: 1 });
+  await service.save(service.context(null, null, true), { ...payload([table('T2')]), revision: 1 });
+  const inherited = await service.get(ctx);
+  expect(inherited).toMatchObject({ revision: 0, inherited: true, templateRevision: 2 });
+  expect(inherited.layout.tables[0].id).toBe('T2');
+  const saved = await service.save(ctx, { ...inherited, assignments: [] });
+  expect(saved.revision).toBe(1);
+  expect((await service.get(ctx)).templateRevision).toBeNull();
 });
 test('assignment is separate from reservation and financial data', async () => {
   const before = JSON.stringify(records);

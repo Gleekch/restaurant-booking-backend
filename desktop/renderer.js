@@ -247,6 +247,7 @@ async function loadReservations() {
         console.log('Données reçues:', data);
         if (data.success) {
             reservations = data.data;
+            window.ServiceRelease.refreshFinancePanel(document.getElementById('reservation-details'), reservations);
             console.log(`${reservations.length} réservations chargées`);
 
             // Si aucune réservation aujourd'hui, pointer vers la prochaine date avec des réservations
@@ -567,11 +568,10 @@ function showReservationDetails(reservation) {
             <div class="detail-field"><span>Téléphone</span>${escapeHtml(reservation.phoneNumber)}</div>
             <div class="detail-field"><span>Email</span>${escapeHtml(reservation.email || 'Non renseigné')}</div>
         </div>
-        ${getDepositText(reservation) ? `<div class="finance-summary"><span>Arrhes · suivi du paiement</span>${getDepositText(reservation)}</div>` : ''}
         ${window.ReservationChanges?.panel(reservation) || ''}
         ${clientEmailNotice(reservation)}
         ${reservation.email && ['pending', 'confirmed', 'cancelled'].includes(reservation.status) ? '<button type="button" class="btn btn-secondary" id="retry-client-email">Renvoyer l\'email au client</button>' : ''}
-        ${window.ServiceRelease.financePanel(false)}
+        ${window.ServiceRelease.financePanel(reservation)}
         ${!['cancelled', 'awaiting-payment'].includes(reservation.status) ? '<button type="button" class="btn btn-secondary" id="assign-tables-btn">Attribuer / modifier les tables</button>' : ''}
         <p><strong>Source :</strong> ${escapeHtml(reservation.source)}</p>
         ${reservation.specialRequests ? `<div class="guest-note"><strong>Demandes spéciales</strong>${escapeHtml(reservation.specialRequests)}</div>` : ''}
@@ -625,18 +625,6 @@ function showReservationDetails(reservation) {
         editReservation(reservation);
     };
     
-    // Bouton "Demander les arrhes" : visible si résa active, email présent, arrhes non payées
-    const depositRequestBtn = document.getElementById('deposit-request-btn');
-    depositRequestBtn.replaceWith(depositRequestBtn.cloneNode(true));
-    const newDepositBtn = document.getElementById('deposit-request-btn');
-    const canRequestDeposit = reservation.email
-        && ['pending', 'confirmed'].includes(reservation.status)
-        && (!reservation.deposit || reservation.deposit.status === 'none' || reservation.deposit.status === 'failed');
-    newDepositBtn.style.display = 'inline-flex';
-    if (canRequestDeposit) {
-        newDepositBtn.onclick = () => requestDepositDesktop(reservation._id);
-    }
-
     // Boutons "Client arrivé" / "No-show" : visibles si résa active
     const isActive = ['pending', 'confirmed'].includes(reservation.status);
     const completedBtn = document.getElementById('completed-btn');

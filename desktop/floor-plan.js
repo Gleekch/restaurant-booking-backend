@@ -136,13 +136,28 @@
     function refreshReviews() {
       for (const a of s.data.assignments) a.review = !booking(a.reservationId) || a.fingerprint !== booking(a.reservationId).fingerprint;
     }
+    function versionOf(data) {
+      // Older backends have no template revision; compare the loaded layout instead.
+      return JSON.stringify([data.revision, Boolean(data.inherited),
+        data.inherited ? data.templateRevision ?? data.layout : null]);
+    }
+    function acceptData(data) {
+      s.data = data;
+      s.loadedVersion = versionOf(data);
+    }
+    function acceptTemplateVersion(template) {
+      if (!s.data.inherited) return;
+      if (Number.isInteger(s.data.templateRevision)) s.data.templateRevision = template.revision;
+      s.loadedVersion = versionOf({ ...s.data, layout: template.layout });
+      s.remoteChanged = false;
+    }
     function receiveRefresh(data) {
       if (s.dragging) { s.pendingRefresh = data; return; }
       const protectedDraft = s.dirty || s.editDirty || s.adding || s.confirming || root.contains(document.activeElement);
-      const changed = data.revision !== s.data.revision;
+      const changed = versionOf(data) !== s.loadedVersion;
       s.syncError = '';
       if (changed && !protectedDraft) {
-        s.data = data; s.remoteChanged = false;
+        acceptData(data); s.remoteChanged = false;
         s.selected = new Set([...s.selected].filter(id => data.layout.tables.some(t => t.id === id)));
         render(); return;
       }
@@ -183,7 +198,7 @@
       try {
         const data = await request(endpoint());
         if (s.disposed) return;
-        s.data = data; s.dirty = false; s.edit = null; s.editDirty = false; s.adding = null; s.remoteChanged = false; s.syncError = ''; s.selected = new Set([...s.selected].filter(id => data.layout.tables.some(t => t.id === id)));
+        acceptData(data); s.dirty = false; s.edit = null; s.editDirty = false; s.adding = null; s.remoteChanged = false; s.syncError = ''; s.selected = new Set([...s.selected].filter(id => data.layout.tables.some(t => t.id === id)));
         if (s.focusBooking && !s.focused) {
           s.focused = true;
           const a = data.assignments.find(a => a.reservationId === s.focusBooking);
@@ -222,7 +237,7 @@
       s.busy = true; render();
       try {
         const data = await writeVerified(endpoint(), clone({ revision: s.data.revision, layout: s.data.layout, assignments: s.data.assignments }));
-        s.data = data; s.dirty = false; s.remoteChanged = false; s.syncError = '';
+        acceptData(data); s.dirty = false; s.remoteChanged = false; s.syncError = '';
         status(s.template ? 'Plan enregistre. Le plan type sera propose aux nouveaux services, sans copier de reservations.' : 'Plan enregistre. Les attributions sont visibles sur les reservations. Les paiements sont inchanges.');
         options.onSaved?.(data);
       } catch (error) { status(error.message, true); }
@@ -237,7 +252,8 @@
         const base = await request('/api/floor-plans/template');
         if (!await confirmPlan(s, base.revision ? 'Remplacer le plan type ?' : 'Creer un plan type ?',
           `Enregistrer cette disposition de ${layout.tables.length} table(s) comme modele reutilisable ? ${base.revision ? 'Le plan type existant sera remplace. ' : ''}Seules les tables et leurs places sont copiees, jamais les reservations. Les services deja enregistres restent inchanges.`, 'Enregistrer le plan type')) return;
-        await writeVerified('/api/floor-plans/template', { revision: base.revision, layout, assignments: [] });
+        const saved = await writeVerified('/api/floor-plans/template', { revision: base.revision, layout, assignments: [] });
+        acceptTemplateVersion(saved);
         status(`Plan type enregistre. Il sera propose aux nouveaux services, sans copier de reservations.${s.dirty ? ' Le brouillon de ce service reste a enregistrer avec Enregistrer le plan.' : ' Le service affiche reste inchange.'}`);
       } catch (error) { status(`Plan type : ${error.message} Votre disposition reste affichee.`, true); }
       finally { s.busy = false; render(); }
@@ -435,7 +451,7 @@
         case 'base':
           if (!await confirmPlan(s, 'Utiliser le plan type ?', 'La disposition et les placements affiches seront remplaces. Les reservations sont conservees et seront a replacer. Enregistrez ensuite le plan pour appliquer ce changement au service.', 'Utiliser le plan type')) break;
           invalidateReads(); s.busy = true; render();
-          try { const base = await request('/api/floor-plans/template'); s.data.layout = clone(base.layout); s.data.assignments = []; s.adding = null; s.edit = null; s.editDirty = false; s.selected.clear(); mark(); } catch (error) { status(error.message, true); }
+          try { const base = await request('/api/floor-plans/template'); s.data.layout = clone(base.layout); s.data.assignments = []; acceptTemplateVersion(base); s.adding = null; s.edit = null; s.editDirty = false; s.selected.clear(); mark(); } catch (error) { status(error.message, true); }
           finally { s.busy = false; render(); } break;
         case 'clear': s.selected.clear(); render(); break;
         case 'cancel-add': s.adding = null; render(); break;

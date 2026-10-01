@@ -83,7 +83,10 @@ async function get(ctx) {
   const existing = await FloorPlan.findById(ctx.key).lean();
   const base = existing || (!ctx.template && await FloorPlan.findById('template').lean());
   const doc = existing || { layout: base?.layout || emptyLayout(), assignments: [], revision: 0 };
-  return decorate(doc, ctx, await bookingsFor(ctx), !existing && !ctx.template);
+  const inherited = !existing && !ctx.template;
+  return { ...decorate(doc, ctx, await bookingsFor(ctx), inherited),
+    // Template freshness is independent of the service's optimistic write revision.
+    templateRevision: inherited ? base?.revision || 0 : null };
 }
 async function save(ctx, payload) {
   if (!payload || !Number.isInteger(payload.revision) || payload.revision < 0) fail('Version du plan requise.');

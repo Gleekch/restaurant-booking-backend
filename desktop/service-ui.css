@@ -235,6 +235,9 @@ button:disabled, .btn:disabled {
 .release-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .release-tools > span { font-size: 10px; color: var(--text-secondary); }
 .release-finance-panel { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 14px; }
+.release-payment-state { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
+.release-payment-state .deposit-badge { font-size: 13px; padding: 7px 10px; }
+.release-payment-state strong { font-size: 15px; font-variant-numeric: tabular-nums; }
 .release-note { color: var(--text-secondary); font-size: 12px; line-height: 1.65; margin-bottom: 10px; }
 .release-finance-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 700px) {

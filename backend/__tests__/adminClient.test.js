@@ -56,3 +56,42 @@ test('expired login is distinguished from an outage and preserves loaded data', 
   expect(node('connection-status.status-text').textContent).toBe('Connecté');
   expect(node('reconnect-button').hidden).toBe(true);
 });
+
+test.each(['month', 'week'])('refresh preserves the selected day in %s', parent => {
+  const { sandbox } = fixture();
+  sandbox.showDayDetail = jest.fn();
+  sandbox.showDayServiceDetail = jest.fn();
+  vm.runInContext(`currentView = '${parent}'; detailView = { parent: '${parent}', date: '2026-10-01', service: 'soir' }; renderView()`, sandbox);
+  if (parent === 'month') expect(sandbox.showDayDetail).toHaveBeenCalledWith('2026-10-01');
+  else expect(sandbox.showDayServiceDetail).toHaveBeenCalledWith('2026-10-01', 'soir');
+});
+
+test('late blocked-service response does not replace the newer date or cache', async () => {
+  const { sandbox, node } = fixture();
+  let finishOld;
+  sandbox.fetch.mockImplementation(url => url.includes('2026-09-30')
+    ? new Promise(resolve => { finishOld = resolve; })
+    : Promise.resolve({ json: async () => ({ data: [{ service: 'soir' }] }) }));
+  vm.runInContext("currentView = 'month'", sandbox);
+  const old = vm.runInContext("showDayDetail('2026-09-30')", sandbox);
+  await vm.runInContext("showDayDetail('2026-10-01')", sandbox);
+  const html = node('content').innerHTML;
+  finishOld({ json: async () => ({ data: [{ service: 'midi' }] }) });
+  await old;
+  expect(node('content').innerHTML).toBe(html);
+  expect(vm.runInContext('detailView.date', sandbox)).toBe('2026-10-01');
+  expect(Array.from(vm.runInContext('blockedServicesCache', sandbox))).toEqual(['soir']);
+});
+
+test('leaving a detail before its response arrives preserves the new screen', async () => {
+  const { sandbox, node } = fixture();
+  let finish;
+  sandbox.fetch.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  vm.runInContext("currentView = 'month'", sandbox);
+  const old = vm.runInContext("showDayDetail('2026-09-30')", sandbox);
+  vm.runInContext("currentView = 'floor-plan'; viewRenderSequence++; detailView = null", sandbox);
+  node('content').innerHTML = 'FLOOR PLAN';
+  finish({ json: async () => ({ data: [] }) });
+  await old;
+  expect(node('content').innerHTML).toBe('FLOOR PLAN');
+});
