@@ -94,6 +94,8 @@
     if (instances.has(root)) { instances.get(root).refresh?.(); return; }
     const s = { date: options.date || new Intl.DateTimeFormat('en-CA', { timeZone: 'Indian/Reunion', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()), service: options.service || 'midi', focusBooking: options.reservationId || null, template: false, zone: 'terrace', selected: new Set(), dirty: false, editDirty: false, edit: null, busy: false, data: null, adding: null, message: '', error: false, generation: 0, refreshing: false, remoteChanged: false, syncError: '' };
     instances.set(root, s);
+    // Interaction safety only: assignments and remote updates remain available.
+    s.layoutLocked = true;
     s.order = 'booking';
     s.events = new AbortController();
     const on = (name, handler) => root.addEventListener(name, handler, { signal: s.events.signal });
@@ -244,7 +246,7 @@
       finally { s.busy = false; render(); }
     }
     async function saveAsTemplate() {
-      if (s.busy || s.confirming || s.adding || !s.data || s.template || !applyEditor()) return;
+      if (s.layoutLocked || s.busy || s.confirming || s.adding || !s.data || s.template || !applyEditor()) return;
       invalidateReads();
       const layout = clone(s.data.layout);
       s.busy = true; render();
@@ -265,25 +267,30 @@
       el.innerHTML = tables.map(t => {
         const a = assigned(t.id), b = a && booking(a.reservationId);
         return `<button type="button" class="fp-table" data-table="${escape(t.id)}" data-round="${t.shape === 'round'}" data-occupied="${Boolean(a)}" aria-pressed="${s.selected.has(t.id)}" aria-label="${escape(`${t.name}, ${t.seats} places${b ? `, ${b.name}` : ''}`)}" style="left:${t.x / 10}%;top:${t.y / 6.5}%;width:${t.width / 10}%;height:${t.height / 6.5}%"><strong>${escape(t.name)}</strong><small>${t.seats} places</small>${a ? `<small>${a.review ? 'A revoir' : escape(b?.name || 'Placement a revoir')}</small>` : ''}</button>`;
-      }).join('') || '<div class="fp-empty"><strong>Composez votre espace</strong>Ajoutez vos tables, puis deplacez-les sur le plan.</div>';
+      }).join('') || `<div class="fp-empty"><strong>Composez votre espace</strong>${s.layoutLocked ? 'Deverrouillez la disposition pour ajouter vos tables.' : 'Ajoutez vos tables, puis deplacez-les sur le plan.'}</div>`;
     }
     function render() {
+      const previousBoard = root.querySelector('.fp-board-wrap');
+      const boardScroll = { left: previousBoard?.scrollLeft || 0, top: previousBoard?.scrollTop || 0 };
       const focus = root.contains(document.activeElement) ? document.activeElement?.dataset?.control : null;
       const active = root.contains(document.activeElement) ? document.activeElement : null;
       const formSelector = active?.closest('[data-table-form]') ? '[data-table-form]' : active?.closest('[data-new-table-form]') ? '[data-new-table-form]' : null;
       const field = formSelector && active.name, start = active?.selectionStart, end = active?.selectionEnd;
-      root.innerHTML = `<section class="staff-tool"><header class="staff-heading"><div><p class="staff-eyebrow">ORGANISATION DU SERVICE</p><h2>Plan de salle</h2></div><div class="fp-actions">${!s.template ? `<button type="button" data-action="save-template" ${!s.data || s.busy || s.adding ? 'disabled' : ''}>Enregistrer comme plan type</button>` : ''}<button type="button" class="staff-primary" data-action="save" ${!s.data || !(s.dirty || s.editDirty) || s.busy || s.adding ? 'disabled' : ''}>${s.template ? 'Enregistrer le plan type' : 'Enregistrer le plan'}</button></div></header>
+      root.innerHTML = `<section class="staff-tool" data-layout-locked="${s.layoutLocked}"><header class="staff-heading"><div><p class="staff-eyebrow">ORGANISATION DU SERVICE</p><h2>Plan de salle</h2></div><div class="fp-actions">${!s.template ? `<button type="button" data-action="save-template" ${s.layoutLocked || !s.data || s.busy || s.adding ? 'disabled' : ''}>Enregistrer comme plan type</button>` : ''}<button type="button" class="staff-primary" data-action="save" ${!s.data || !(s.dirty || s.editDirty) || s.busy || s.adding ? 'disabled' : ''}>${s.template ? 'Enregistrer le plan type' : 'Enregistrer le plan'}</button></div></header>
         <fieldset class="fp-fieldset" ${s.busy ? 'disabled' : ''}><div class="staff-toolbar fp-context">
           <label>Disposition<select data-control="mode"><option value="service" ${!s.template ? 'selected' : ''}>Ce service</option><option value="template" ${s.template ? 'selected' : ''}>Plan type reutilisable</option></select></label>
           ${!s.template ? `<label>Date<input type="date" data-control="date" value="${escape(s.date)}" required></label><label>Service<select data-control="service"><option value="midi" ${s.service === 'midi' ? 'selected' : ''}>Midi</option><option value="soir" ${s.service === 'soir' ? 'selected' : ''}>Soir</option></select></label>` : ''}
-          <button type="button" data-action="reload">Recharger</button>${!s.template && s.data ? '<button type="button" data-action="base">Utiliser le plan type</button>' : ''}</div>
+          <button type="button" data-action="reload">Recharger</button>${!s.template && s.data ? `<button type="button" data-action="base" ${s.layoutLocked ? 'disabled' : ''}>Utiliser le plan type</button>` : ''}</div>
         <div class="fp-message" role="status" aria-live="polite" data-error="${s.error}">${escape(s.message)}</div>
         <p class="fp-sync" role="status" aria-live="polite" hidden></p>
         ${s.data ? `<p class="staff-muted">${s.template ? 'Le plan type initialise les futurs services. Les services deja enregistres restent inchanges.' : `${s.data.closed ? 'Service habituellement ferme : aucune nouvelle reservation autorisee. ' : ''}Une table est attribuee a un seul groupe pour tout le service. Pas de second placement automatique.`} Les places du plan ne remplacent pas les limites de reservation.</p>
-        <div class="fp-workspace"><div><div class="fp-tabs">${s.data.layout.zones.map(z => `<button type="button" data-zone="${z.id}" aria-pressed="${s.zone === z.id}">${escape(z.name)} · ${s.data.layout.tables.filter(t => t.zone === z.id).reduce((n, t) => n + t.seats, 0)} places</button>`).join('')}</div><div class="fp-board-wrap"><div class="fp-board" aria-label="Disposition des tables"></div></div><p class="staff-muted">Glissez les tables pour les deplacer. Touchez plusieurs tables pour les regrouper. Sur telephone, faites defiler le plan horizontalement depuis une zone vide. Les fleches du clavier deplacent la table selectionnee.</p></div>
-        <aside class="fp-side"><div><h3>Composer la salle</h3><p class="staff-muted">${s.data.layout.tables.length} table(s) · ${s.selected.size} selectionnee(s)</p><div class="fp-actions"><button type="button" data-action="add">+ Ajouter une table</button><button type="button" data-action="clear">Deselectionner</button></div><details class="fp-catalog" ${!s.data.layout.tables.length ? 'open' : ''}><summary>Numeros du restaurant</summary><p class="staff-muted">Choisissez un numero, sa zone et ses places. Rien n'est ajoute sans validation.</p><div>${(s.data.tableCatalog || []).map(name => `<button type="button" data-catalog="${escape(name)}" aria-label="Ajouter la table ${escape(name)}" ${s.data.layout.tables.some(t => t.name === name) ? 'disabled' : ''}>${escape(name)}</button>`).join('')}</div></details></div><div data-editor></div></aside></div>
+        <div class="fp-lock-bar"><div><strong>${s.layoutLocked ? 'Disposition verrouillee' : 'Disposition modifiable'}</strong><p class="staff-muted">${s.layoutLocked ? 'Selectionnez les tables pour placer les clients. Vous pouvez faire defiler le plan, meme depuis une table.' : 'Les tables peuvent etre deplacees ou modifiees. Reverrouillez la disposition pour le service.'}</p></div><button type="button" data-action="toggle-lock" aria-label="Verrouiller la disposition" aria-pressed="${s.layoutLocked}" title="${s.layoutLocked ? 'Deverrouiller la disposition' : 'Verrouiller la disposition'}"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="${s.layoutLocked ? 'M8 10V7a4 4 0 0 1 8 0v3' : 'M8 10V7a4 4 0 0 1 8 0'}"/></svg>${s.layoutLocked ? 'Deverrouiller' : 'Verrouiller'}</button></div>
+        <div class="fp-workspace"><div><div class="fp-tabs">${s.data.layout.zones.map(z => `<button type="button" data-zone="${z.id}" aria-pressed="${s.zone === z.id}">${escape(z.name)} · ${s.data.layout.tables.filter(t => t.zone === z.id).reduce((n, t) => n + t.seats, 0)} places</button>`).join('')}</div><div class="fp-board-wrap"><div class="fp-board" aria-label="Disposition des tables"></div></div><p class="staff-muted">${s.layoutLocked ? 'Touchez une ou plusieurs tables pour les selectionner, puis choisissez Placer et Enregistrer le plan. La disposition reste fixe.' : 'Glissez les tables pour les deplacer. Touchez plusieurs tables pour les regrouper. Sur telephone, faites defiler le plan horizontalement depuis une zone vide. Les fleches du clavier deplacent la table selectionnee.'}</p></div>
+        <aside class="fp-side"><div><h3>${s.layoutLocked ? 'Selection des tables' : 'Composer la salle'}</h3><p class="staff-muted">${s.data.layout.tables.length} table(s) · ${s.selected.size} selectionnee(s)</p><div class="fp-actions">${s.layoutLocked ? '' : '<button type="button" data-action="add">+ Ajouter une table</button>'}<button type="button" data-action="clear">Deselectionner</button></div>${s.layoutLocked ? '' : `<details class="fp-catalog" ${!s.data.layout.tables.length ? 'open' : ''}><summary>Numeros du restaurant</summary><p class="staff-muted">Choisissez un numero, sa zone et ses places. Rien n'est ajoute sans validation.</p><div>${(s.data.tableCatalog || []).map(name => `<button type="button" data-catalog="${escape(name)}" aria-label="Ajouter la table ${escape(name)}" ${s.data.layout.tables.some(t => t.name === name) ? 'disabled' : ''}>${escape(name)}</button>`).join('')}</div></details>`}</div><div data-editor></div></aside></div>
         ${!s.template ? `<div class="fp-bookings"><div class="fp-bookings-heading"><div><h3>Reservations du service</h3><p class="staff-muted">Les premieres reservations sont prioritaires pour les tables proches de la mer. Le rang suit la date de prise initiale, pas l'heure du repas ni la confirmation.</p></div><label>Trier les reservations<select data-control="order"><option value="booking" ${s.order === 'booking' ? 'selected' : ''}>Ordre de reservation</option><option value="time" ${s.order === 'time' ? 'selected' : ''}>Heure du repas</option></select></label></div><p class="staff-muted">Selectionnez les tables sur le plan, puis cliquez sur Placer et Enregistrer le plan. Le placement reste manuel, selon les places et les demandes des clients. Aucun placement existant n'est deplace automatiquement.</p><div data-bookings></div></div>` : ''}` : '<p class="staff-muted">Le plan necessite le backend mis a jour. Aucune donnee existante n\'est modifiee en cas d\'indisponibilite.</p>'}</fieldset></section>`;
       if (s.data) { board(); editor(); bookings(); }
+      const nextBoard = root.querySelector('.fp-board-wrap');
+      if (nextBoard) { nextBoard.scrollLeft = boardScroll.left; nextBoard.scrollTop = boardScroll.top; }
       if (focus) root.querySelector(`[data-control="${focus}"]`)?.focus();
       if (field) {
         const input = root.querySelector(`${formSelector} [name="${field}"]`);
@@ -295,6 +302,10 @@
     function editor() {
       const target = root.querySelector('[data-editor]'), tables = selectedTables();
       if (!target) return;
+      if (s.layoutLocked) {
+        target.innerHTML = tables.length ? `<p class="staff-muted">Tables ${escape(tables.map(t => t.name).join(' + '))} : ${tables.reduce((sum, t) => sum + t.seats, 0)} places selectionnees.</p>` : '<p class="staff-muted">Touchez les tables du prochain groupe. Deverrouillez uniquement pour modifier la disposition.</p>';
+        return;
+      }
       if (s.adding) {
         target.innerHTML = `<form data-new-table-form><h3>Ajouter une table</h3><label>Numero / nom<input name="name" maxlength="24" value="${escape(s.adding.name)}" required></label><label>Places pour cette disposition<input name="seats" type="number" min="1" max="20" value="${escape(s.adding.seats || '')}" placeholder="A renseigner" required></label><label>Zone<select name="zone" required><option value="">Choisir la zone</option>${s.data.layout.zones.map(z => `<option value="${z.id}" ${s.adding.zone === z.id ? 'selected' : ''}>${escape(z.name)}</option>`).join('')}</select></label><button type="submit" class="staff-primary">Ajouter au plan</button><button type="button" data-action="cancel-add">Annuler l'ajout</button></form>`;
         return;
@@ -331,6 +342,7 @@
       }).join('') || '<p class="staff-muted">Aucune reservation pour ce service. Le plan ne cree aucune reservation.</p>');
     }
     function move(dx, dy) {
+      if (s.layoutLocked) return;
       const tables = selectedTables();
       if (!tables.length) return;
       dx = Math.max(-Math.min(...tables.map(t => t.x)), Math.min(dx, Math.min(...tables.map(t => 1000 - t.width - t.x))));
@@ -344,6 +356,7 @@
       let n = 1; while (s.data.layout.tables.some(t => t.name === String(n))) n++; return String(n);
     }
     function addTable(t) {
+      if (s.layoutLocked) return;
       let positioned = false;
       for (let y = 40; y + t.height <= 650 && !positioned; y += 120) {
         for (let x = 40; x + t.width <= 1000; x += 150) {
@@ -353,6 +366,7 @@
       s.data.layout.tables.push(t); s.zone = t.zone; s.selected = new Set([t.id]); s.adding = null; mark(); render();
     }
     function captureEditor(form) {
+      if (s.layoutLocked) return;
       const old = selectedTables()[0];
       if (!old) return;
       const values = Object.fromEntries(new FormData(form));
@@ -362,6 +376,7 @@
     }
     function applyEditor() {
       if (!s.editDirty) return true;
+      if (s.layoutLocked) return false;
       const form = root.querySelector('[data-table-form]');
       if (!form || !form.reportValidity()) return false;
       const old = s.data.layout.tables.find(t => t.id === s.edit.id), f = s.edit.values;
@@ -404,7 +419,7 @@
     on('input', trackForm); on('change', trackForm);
     on('submit', e => {
       if (e.target.matches('[data-new-table-form]')) {
-        e.preventDefault(); if (s.busy) return;
+        e.preventDefault(); if (s.busy || s.layoutLocked) return;
         const f = new FormData(e.target), name = f.get('name').trim(), seats = Number(f.get('seats')), zone = f.get('zone');
         if (!name || s.data.layout.tables.some(t => t.name.toLowerCase() === name.toLowerCase())) { status('Choisissez un numero ou nom distinct.', true); return; }
         if (!Number.isInteger(seats) || seats < 1 || seats > 20 || !s.data.layout.zones.some(z => z.id === zone) || s.data.layout.tables.length >= 80) { status('Renseignez la zone et de 1 a 20 places (80 tables maximum).', true); return; }
@@ -412,13 +427,23 @@
       }
       if (!e.target.matches('[data-table-form]')) return;
       e.preventDefault();
-      if (s.busy) return;
+      if (s.busy || s.layoutLocked) return;
       captureEditor(e.target);
       if (applyEditor()) render();
     });
     on('click', async e => {
-      if (s.busy || s.confirming) return;
-      const el = e.target.closest('button'); if (!el) return;
+      if (s.busy || s.confirming || s.dragging) return;
+      const el = e.target.closest('button'); if (!el || el.disabled) return;
+      if (el.dataset.action === 'toggle-lock') {
+        if (!s.data) return;
+        if (!s.layoutLocked && (s.editDirty || s.adding)) {
+          status('Appliquez les proprietes ou terminez / annulez l ajout avant de verrouiller. Votre saisie est conservee.', true); return;
+        }
+        s.layoutLocked = !s.layoutLocked; s.suppressClick = false;
+        status(`${s.layoutLocked ? 'Disposition verrouillee. Le placement des clients reste possible.' : 'Disposition deverrouillee. Les tables sont modifiables.'}${s.dirty ? ' Modifications non enregistrees conservees.' : ''}`);
+        render(); root.querySelector('[data-action="toggle-lock"]')?.focus({ preventScroll: true }); return;
+      }
+      if (s.layoutLocked && (el.dataset.catalog || el.dataset.move || ['add', 'duplicate', 'remove', 'base', 'save-template'].includes(el.dataset.action))) return;
       if ((el.dataset.catalog || el.dataset.table || el.dataset.zone || el.dataset.move || el.dataset.place || el.dataset.open || ['add', 'duplicate', 'clear'].includes(el.dataset.action)) && !applyEditor()) return;
       if (el.dataset.catalog) { if (s.adding && !await discard()) return; s.adding = { name: el.dataset.catalog }; render(); root.querySelector('[data-new-table-form]')?.scrollIntoView({ block: 'nearest' }); return; }
       if (s.adding && (el.dataset.zone || el.dataset.table || el.dataset.action === 'clear' || el.dataset.action === 'duplicate' || el.dataset.place)) { status('Terminez ou annulez l ajout de table avant de continuer.', true); return; }
@@ -477,7 +502,7 @@
     });
     on('keydown', e => {
       const table = e.target.closest('[data-table]');
-      if (!table || s.busy || s.adding || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+      if (!table || s.layoutLocked || s.busy || s.adding || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
       if (!applyEditor()) { e.preventDefault(); return; }
       e.preventDefault(); s.selected = new Set([table.dataset.table]);
       const [x, y] = { ArrowLeft: [-10, 0], ArrowRight: [10, 0], ArrowUp: [0, -10], ArrowDown: [0, 10] }[e.key]; move(x, y);
@@ -485,7 +510,7 @@
     });
     // Keep the dragged DOM node alive until pointerup: pointer capture is lost on rerender.
     on('pointerdown', e => {
-      const el = e.target.closest('[data-table]'); if (!el || s.busy || s.adding || e.button !== 0) return;
+      const el = e.target.closest('[data-table]'); if (!el || s.layoutLocked || s.busy || s.confirming || s.adding || e.button !== 0) return;
       if (!applyEditor()) { e.preventDefault(); return; }
       s.dragging = true;
       s.suppressClick = false;
