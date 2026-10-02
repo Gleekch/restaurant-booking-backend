@@ -22,7 +22,7 @@ async function fixture() {
   await new Promise(resolve => setImmediate(resolve));
   const emit = async (name, dataset, extra = {}) => {
     const element = { dataset, disabled: false, ...extra };
-    const event = { target: { closest: () => element }, ...extra };
+    const event = { target: { ...element, closest: () => element }, ...extra };
     for (const fn of handlers[name] || []) await fn(event);
   };
   const click = dataset => emit('click', dataset);
@@ -89,4 +89,85 @@ test('selection rerender preserves the board scroll position on a narrow screen'
   f.node('.fp-board-wrap').scrollLeft = 123;
   await f.click({ table: 't1' });
   expect(f.node('.fp-board-wrap').scrollLeft).toBe(123);
+});
+
+test('service view and zoom are presentation-only, with the layout still locked', async () => {
+  const f = await fixture(), before = JSON.stringify(f.data);
+  await f.click({ action: 'expand-view' });
+  expect(f.root.innerHTML).toContain('fp-service-mode');
+  await f.click({ action: 'zoom-in' });
+  expect(f.root.innerHTML).toContain('--fp-zoom:1.25');
+  await f.click({ action: 'zoom-reset' });
+  expect(f.root.innerHTML).toContain('--fp-zoom:1');
+  await f.click({ action: 'exit-view' });
+  expect(f.root.innerHTML).not.toContain('fp-service-mode');
+  expect(JSON.stringify(f.data)).toBe(before);
+  expect(f.writes()).toHaveLength(0);
+});
+
+test('closing service view keeps a pending table assignment until explicit save', async () => {
+  const f = await fixture();
+  await f.click({ action: 'expand-view' });
+  await f.click({ table: 't1' });
+  await f.click({ place: 'r1' });
+  await f.click({ action: 'exit-view' });
+  expect(f.writes()).toHaveLength(0);
+  await f.click({ action: 'save' });
+  expect(f.writes()[0][1].body.assignments[0].tableIds).toEqual(['t1']);
+});
+
+test('unlocked composition cannot enter service view through a stale button', async () => {
+  const f = await fixture();
+  await f.click({ action: 'toggle-lock' });
+  await f.click({ action: 'expand-view' });
+  expect(f.root.innerHTML).not.toContain('fp-service-mode');
+  expect(f.writes()).toHaveLength(0);
+});
+
+test('unplaced filter hides placed guests without changing their assignments', async () => {
+  const f = await fixture();
+  await f.click({ table: 't1' });
+  await f.click({ place: 'r1' });
+  await f.emit('change', { control: 'placement-filter' }, { value: 'unplaced' });
+  expect(f.node('[data-bookings]').innerHTML).toContain('Tous les clients sont places');
+  await f.emit('change', { control: 'placement-filter' }, { value: 'all' });
+  expect(f.node('[data-bookings]').innerHTML).toContain('CLIENT FICTIF');
+  expect(f.writes()).toHaveLength(0);
+});
+
+test('choosing a group, removing a selected table and cancelling do not write or assign', async () => {
+  const f = await fixture();
+  await f.click({ choose: 'r1' });
+  await f.click({ table: 't1' });
+  expect(f.node('.fp-board').innerHTML).toContain('aria-pressed="true"');
+  await f.click({ deselect: 't1' });
+  expect(f.node('.fp-board').innerHTML).toContain('aria-pressed="false"');
+  await f.click({ action: 'cancel-placement' });
+  expect(f.data.assignments).toHaveLength(0);
+  expect(f.writes()).toHaveLength(0);
+});
+
+test('guided assignment preserves geometry and requires explicit save', async () => {
+  const f = await fixture(), layout = JSON.stringify(f.data.layout);
+  await f.click({ choose: 'r1' });
+  await f.click({ table: 't1' });
+  await f.click({ action: 'confirm-placement' });
+  expect(f.data.assignments[0].reservationId).toBe('r1');
+  expect(f.writes()).toHaveLength(0);
+  await f.click({ action: 'save' });
+  expect(JSON.stringify(f.writes()[0][1].body.layout)).toBe(layout);
+});
+
+test('guided placement cannot overwrite another group or use insufficient seats', async () => {
+  const f = await fixture();
+  f.data.assignments.push({ reservationId: 'other', tableIds: ['t1'] });
+  await f.click({ choose: 'r1' });
+  await f.click({ table: 't1' });
+  await f.click({ action: 'confirm-placement' });
+  expect(f.data.assignments[0].reservationId).toBe('other');
+  expect(f.data.assignments).toHaveLength(1);
+  f.data.assignments = []; f.data.layout.tables[0].seats = 2;
+  await f.click({ action: 'confirm-placement' });
+  expect(f.data.assignments).toHaveLength(0);
+  expect(f.writes()).toHaveLength(0);
 });

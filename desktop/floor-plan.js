@@ -97,8 +97,16 @@
     // Interaction safety only: assignments and remote updates remain available.
     s.layoutLocked = true;
     s.order = 'booking';
+    s.planView = 'auto'; s.contextOpen = false; s.zoom = 1; s.placementFilter = 'all';
     s.events = new AbortController();
     const on = (name, handler) => root.addEventListener(name, handler, { signal: s.events.signal });
+    const landscape = window.matchMedia?.('(max-height: 600px) and (orientation: landscape) and (pointer: coarse)');
+    const serviceView = () => s.layoutLocked && (s.planView === 'expanded' || s.planView === 'auto' && Boolean(landscape?.matches));
+    function syncView() {
+      root.querySelector('.fp-tool')?.classList?.toggle('fp-service-mode', serviceView());
+    }
+    // Rotation changes only the presentation; keep live DOM, selection and drafts.
+    landscape?.addEventListener?.('change', syncView, { signal: s.events.signal });
     const endpoint = () => s.template ? '/api/floor-plans/template' : `/api/floor-plans/service?date=${s.date}&service=${s.service}`;
     const selectedTables = () => s.data.layout.tables.filter(t => s.selected.has(t.id));
     const assigned = id => s.data.assignments.find(a => a.tableIds.includes(id));
@@ -266,32 +274,51 @@
       const tables = s.data.layout.tables.filter(t => t.zone === s.zone);
       el.innerHTML = tables.map(t => {
         const a = assigned(t.id), b = a && booking(a.reservationId);
-        return `<button type="button" class="fp-table" data-table="${escape(t.id)}" data-round="${t.shape === 'round'}" data-occupied="${Boolean(a)}" aria-pressed="${s.selected.has(t.id)}" aria-label="${escape(`${t.name}, ${t.seats} places${b ? `, ${b.name}` : ''}`)}" style="left:${t.x / 10}%;top:${t.y / 6.5}%;width:${t.width / 10}%;height:${t.height / 6.5}%"><strong>${escape(t.name)}</strong><small>${t.seats} places</small>${a ? `<small>${a.review ? 'A revoir' : escape(b?.name || 'Placement a revoir')}</small>` : ''}</button>`;
+        const state = a?.review ? 'review' : a ? a.reservationId === s.focusBooking ? 'own' : 'occupied' : 'free';
+        return `<button type="button" class="fp-table" data-table="${escape(t.id)}" data-round="${t.shape === 'round'}" data-occupied="${Boolean(a)}" data-seat-state="${state}" data-conflict="${Boolean(s.focusBooking && a && a.reservationId !== s.focusBooking)}" aria-pressed="${s.selected.has(t.id)}" aria-label="${escape(`${t.name}, ${t.seats} places, ${state === 'free' ? 'libre' : state === 'review' ? 'placement a revoir' : state === 'own' ? 'ce groupe' : 'attribuee'}${b ? `, ${b.name}` : ''}`)}" style="left:${t.x / 10}%;top:${t.y / 6.5}%;width:${t.width / 10}%;height:${t.height / 6.5}%"><strong>${escape(t.name)}</strong><small>${t.seats} places</small>${a ? `<small>${a.review ? 'A revoir' : escape(b?.name || 'Placement a revoir')}</small>` : '<small class="fp-table-free">Libre</small>'}</button>`;
       }).join('') || `<div class="fp-empty"><strong>Composez votre espace</strong>${s.layoutLocked ? 'Deverrouillez la disposition pour ajouter vos tables.' : 'Ajoutez vos tables, puis deplacez-les sur le plan.'}</div>`;
     }
     function render() {
       const previousBoard = root.querySelector('.fp-board-wrap');
       const boardScroll = { left: previousBoard?.scrollLeft || 0, top: previousBoard?.scrollTop || 0 };
+      const previousBookings = root.querySelector('[data-bookings]');
+      const bookingScroll = previousBookings?.scrollTop || 0;
       const focus = root.contains(document.activeElement) ? document.activeElement?.dataset?.control : null;
       const active = root.contains(document.activeElement) ? document.activeElement : null;
+      const focusedTable = active?.dataset?.table, focusedAction = active?.dataset?.action;
+      const bookingAction = active && ['place', 'unplace', 'open', 'choose', 'deselect'].find(key => active.dataset?.[key]);
+      const focusedBooking = bookingAction && active.dataset[bookingAction];
       const formSelector = active?.closest('[data-table-form]') ? '[data-table-form]' : active?.closest('[data-new-table-form]') ? '[data-new-table-form]' : null;
       const field = formSelector && active.name, start = active?.selectionStart, end = active?.selectionEnd;
-      root.innerHTML = `<section class="staff-tool" data-layout-locked="${s.layoutLocked}"><header class="staff-heading"><div><p class="staff-eyebrow">ORGANISATION DU SERVICE</p><h2>Plan de salle</h2></div><div class="fp-actions">${!s.template ? `<button type="button" data-action="save-template" ${s.layoutLocked || !s.data || s.busy || s.adding ? 'disabled' : ''}>Enregistrer comme plan type</button>` : ''}<button type="button" class="staff-primary" data-action="save" ${!s.data || !(s.dirty || s.editDirty) || s.busy || s.adding ? 'disabled' : ''}>${s.template ? 'Enregistrer le plan type' : 'Enregistrer le plan'}</button></div></header>
+      root.innerHTML = `<section class="staff-tool fp-tool${serviceView() ? ' fp-service-mode' : ''}" data-layout-locked="${s.layoutLocked}" data-template="${s.template}" data-context-open="${s.contextOpen}" style="--fp-zoom:${s.zoom}"><header class="staff-heading"><div class="fp-heading-title"><img class="fp-mode-logo" src="assets/brand-spiral.svg" alt="" width="28" height="28"><div><p class="staff-eyebrow">ORGANISATION DU SERVICE</p><h2>Plan de salle</h2><span class="fp-view-lock">Disposition verrouillee${s.data?.closed ? ' · Service ferme' : ''}</span></div></div><div class="fp-actions"><button type="button" data-action="expand-view" ${!s.data || !s.layoutLocked || s.busy ? 'disabled' : ''} title="${s.layoutLocked ? 'Afficher le plan et les reservations dans une vue agrandie' : 'Verrouillez la disposition pour utiliser la vue service'}">Vue service</button><button type="button" class="fp-view-context" data-action="view-context" aria-expanded="${s.contextOpen}" title="Changer la date, le service ou le mode du plan">${s.template ? 'Plan type' : `${escape(s.date.split('-').reverse().join('/'))} · ${s.service === 'midi' ? 'Midi' : 'Soir'}`}</button>${!s.template ? `<button type="button" data-action="save-template" ${s.layoutLocked || !s.data || s.busy || s.adding ? 'disabled' : ''}>Enregistrer comme plan type</button>` : ''}<button type="button" class="staff-primary" data-action="save" ${!s.data || !(s.dirty || s.editDirty) || s.busy || s.adding ? 'disabled' : ''}>${s.template ? 'Enregistrer le plan type' : 'Enregistrer le plan'}</button><button type="button" data-action="exit-view" aria-label="Fermer la vue service">Fermer</button></div></header>
         <fieldset class="fp-fieldset" ${s.busy ? 'disabled' : ''}><div class="staff-toolbar fp-context">
           <label>Disposition<select data-control="mode"><option value="service" ${!s.template ? 'selected' : ''}>Ce service</option><option value="template" ${s.template ? 'selected' : ''}>Plan type reutilisable</option></select></label>
           ${!s.template ? `<label>Date<input type="date" data-control="date" value="${escape(s.date)}" required></label><label>Service<select data-control="service"><option value="midi" ${s.service === 'midi' ? 'selected' : ''}>Midi</option><option value="soir" ${s.service === 'soir' ? 'selected' : ''}>Soir</option></select></label>` : ''}
           <button type="button" data-action="reload">Recharger</button>${!s.template && s.data ? `<button type="button" data-action="base" ${s.layoutLocked ? 'disabled' : ''}>Utiliser le plan type</button>` : ''}</div>
         <div class="fp-message" role="status" aria-live="polite" data-error="${s.error}">${escape(s.message)}</div>
         <p class="fp-sync" role="status" aria-live="polite" hidden></p>
-        ${s.data ? `<p class="staff-muted">${s.template ? 'Le plan type initialise les futurs services. Les services deja enregistres restent inchanges.' : `${s.data.closed ? 'Service habituellement ferme : aucune nouvelle reservation autorisee. ' : ''}Une table est attribuee a un seul groupe pour tout le service. Pas de second placement automatique.`} Les places du plan ne remplacent pas les limites de reservation.</p>
+        ${s.data ? `<p class="staff-muted fp-rule">${s.template ? 'Le plan type initialise les futurs services. Les services deja enregistres restent inchanges.' : `${s.data.closed ? 'Service habituellement ferme : aucune nouvelle reservation autorisee. ' : ''}Une table est attribuee a un seul groupe pour tout le service. Pas de second placement automatique.`} Les places du plan ne remplacent pas les limites de reservation.</p>
+        <p class="fp-view-hint">Tournez votre telephone pour afficher le plan et les reservations cote a cote.</p>
         <div class="fp-lock-bar"><div><strong>${s.layoutLocked ? 'Disposition verrouillee' : 'Disposition modifiable'}</strong><p class="staff-muted">${s.layoutLocked ? 'Selectionnez les tables pour placer les clients. Vous pouvez faire defiler le plan, meme depuis une table.' : 'Les tables peuvent etre deplacees ou modifiees. Reverrouillez la disposition pour le service.'}</p></div><button type="button" data-action="toggle-lock" aria-label="Verrouiller la disposition" aria-pressed="${s.layoutLocked}" title="${s.layoutLocked ? 'Deverrouiller la disposition' : 'Verrouiller la disposition'}"><svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="${s.layoutLocked ? 'M8 10V7a4 4 0 0 1 8 0v3' : 'M8 10V7a4 4 0 0 1 8 0'}"/></svg>${s.layoutLocked ? 'Deverrouiller' : 'Verrouiller'}</button></div>
-        <div class="fp-workspace"><div><div class="fp-tabs">${s.data.layout.zones.map(z => `<button type="button" data-zone="${z.id}" aria-pressed="${s.zone === z.id}">${escape(z.name)} · ${s.data.layout.tables.filter(t => t.zone === z.id).reduce((n, t) => n + t.seats, 0)} places</button>`).join('')}</div><div class="fp-board-wrap"><div class="fp-board" aria-label="Disposition des tables"></div></div><p class="staff-muted">${s.layoutLocked ? 'Touchez une ou plusieurs tables pour les selectionner, puis choisissez Placer et Enregistrer le plan. La disposition reste fixe.' : 'Glissez les tables pour les deplacer. Touchez plusieurs tables pour les regrouper. Sur telephone, faites defiler le plan horizontalement depuis une zone vide. Les fleches du clavier deplacent la table selectionnee.'}</p></div>
+        <div class="fp-layout"><div class="fp-workspace"><div class="fp-plan-panel"><div class="fp-map-toolbar"><div class="fp-tabs">${s.data.layout.zones.map(z => `<button type="button" data-zone="${z.id}" aria-pressed="${s.zone === z.id}"><span>${escape(z.name)}</span><small> · ${s.data.layout.tables.filter(t => t.zone === z.id).reduce((n, t) => n + t.seats, 0)} places</small></button>`).join('')}</div><div class="fp-zoom-controls" aria-label="Zoom du plan"><button type="button" data-action="zoom-out" aria-label="Zoom arriere" ${s.zoom <= 1 ? 'disabled' : ''}>&minus;</button><button type="button" data-action="zoom-reset" title="Revenir a 100 %">${Math.round(s.zoom * 100)}%</button><button type="button" data-action="zoom-in" aria-label="Zoom avant" ${s.zoom >= 2 ? 'disabled' : ''}>+</button></div></div><div class="fp-board-wrap"><div class="fp-board" aria-label="Disposition des tables"></div></div><p class="staff-muted fp-board-help">${s.layoutLocked ? 'Touchez une ou plusieurs tables pour les selectionner, puis choisissez Placer et Enregistrer le plan. La disposition reste fixe.' : 'Glissez les tables pour les deplacer. Touchez plusieurs tables pour les regrouper. Sur telephone, faites defiler le plan horizontalement depuis une zone vide. Les fleches du clavier deplacent la table selectionnee.'}</p></div>
         <aside class="fp-side"><div><h3>${s.layoutLocked ? 'Selection des tables' : 'Composer la salle'}</h3><p class="staff-muted">${s.data.layout.tables.length} table(s) · ${s.selected.size} selectionnee(s)</p><div class="fp-actions">${s.layoutLocked ? '' : '<button type="button" data-action="add">+ Ajouter une table</button>'}<button type="button" data-action="clear">Deselectionner</button></div>${s.layoutLocked ? '' : `<details class="fp-catalog" ${!s.data.layout.tables.length ? 'open' : ''}><summary>Numeros du restaurant</summary><p class="staff-muted">Choisissez un numero, sa zone et ses places. Rien n'est ajoute sans validation.</p><div>${(s.data.tableCatalog || []).map(name => `<button type="button" data-catalog="${escape(name)}" aria-label="Ajouter la table ${escape(name)}" ${s.data.layout.tables.some(t => t.name === name) ? 'disabled' : ''}>${escape(name)}</button>`).join('')}</div></details>`}</div><div data-editor></div></aside></div>
-        ${!s.template ? `<div class="fp-bookings"><div class="fp-bookings-heading"><div><h3>Reservations du service</h3><p class="staff-muted">Les premieres reservations sont prioritaires pour les tables proches de la mer. Le rang suit la date de prise initiale, pas l'heure du repas ni la confirmation.</p></div><label>Trier les reservations<select data-control="order"><option value="booking" ${s.order === 'booking' ? 'selected' : ''}>Ordre de reservation</option><option value="time" ${s.order === 'time' ? 'selected' : ''}>Heure du repas</option></select></label></div><p class="staff-muted">Selectionnez les tables sur le plan, puis cliquez sur Placer et Enregistrer le plan. Le placement reste manuel, selon les places et les demandes des clients. Aucun placement existant n'est deplace automatiquement.</p><div data-bookings></div></div>` : ''}` : '<p class="staff-muted">Le plan necessite le backend mis a jour. Aucune donnee existante n\'est modifiee en cas d\'indisponibilite.</p>'}</fieldset></section>`;
+        ${!s.template ? `<div class="fp-bookings"><div class="fp-bookings-heading"><div><h3>Reservations du service</h3><span class="fp-booking-count" data-booking-count></span><p class="staff-muted">Les premieres reservations sont prioritaires pour les tables proches de la mer. Le rang suit la date de prise initiale, pas l'heure du repas ni la confirmation.</p></div><div class="fp-booking-filters"><label>Ordre<select data-control="order" aria-label="Trier les reservations"><option value="booking" ${s.order === 'booking' ? 'selected' : ''}>Ordre de reservation</option><option value="time" ${s.order === 'time' ? 'selected' : ''}>Heure du repas</option></select></label><label>Afficher<select data-control="placement-filter"><option value="all" ${s.placementFilter === 'all' ? 'selected' : ''}>Toutes</option><option value="unplaced" ${s.placementFilter === 'unplaced' ? 'selected' : ''}>A placer</option></select></label></div></div><p class="staff-muted fp-booking-help">Selectionnez les tables sur le plan, puis cliquez sur Placer et Enregistrer le plan. Le placement reste manuel, selon les places et les demandes des clients. Aucun placement existant n'est deplace automatiquement.</p><div data-bookings></div></div>` : ''}</div>` : '<p class="staff-muted">Le plan necessite le backend mis a jour. Aucune donnee existante n\'est modifiee en cas d\'indisponibilite.</p>'}</fieldset></section>`;
+      if (s.data && !s.template) {
+        root.querySelector('.fp-layout')?.insertAdjacentHTML?.('beforeend', '<div data-placement-desk></div>');
+      }
       if (s.data) { board(); editor(); bookings(); }
       const nextBoard = root.querySelector('.fp-board-wrap');
       if (nextBoard) { nextBoard.scrollLeft = boardScroll.left; nextBoard.scrollTop = boardScroll.top; }
+      const nextBookings = root.querySelector('[data-bookings]');
+      if (nextBookings) nextBookings.scrollTop = bookingScroll;
       if (focus) root.querySelector(`[data-control="${focus}"]`)?.focus();
+      if (!focus && !field && active) {
+        const target = focusedTable ? root.querySelector(`[data-table="${focusedTable}"]`)
+          : focusedAction ? root.querySelector(`[data-action="${focusedAction}"]`)
+            : focusedBooking ? root.querySelector(`[data-${bookingAction}="${focusedBooking}"]`) : null;
+        if (target && !target.matches(':disabled')) target.focus({ preventScroll: true });
+        else if (serviceView()) root.querySelector('[data-action="exit-view"]')?.focus({ preventScroll: true });
+      }
       if (field) {
         const input = root.querySelector(`${formSelector} [name="${field}"]`);
         input?.focus({ preventScroll: true });
@@ -331,15 +358,43 @@
       const placedIds = new Set(s.data.assignments.map(a => a.reservationId));
       const rows = orderedBookings(s.data.bookings, s.order);
       for (const a of s.data.assignments) if (!booking(a.reservationId)) rows.push({ id: a.reservationId, name: 'Reservation annulee ou deplacee', time: '', people: null });
+      const unplaced = rows.filter(b => {
+        const assignment = s.data.assignments.find(a => a.reservationId === b.id);
+        return !assignment || assignment.review;
+      });
+      const visibleRows = s.placementFilter === 'unplaced' ? unplaced : rows;
+      const count = root.querySelector('[data-booking-count]');
+      if (count) count.textContent = `${s.data.bookings.length} reservations · ${unplaced.length} a placer / revoir`;
       const selection = tables.length ? `Tables selectionnees : ${tables.map(t => t.name).join(' + ')} / ${tables.reduce((n, t) => n + t.seats, 0)} places au total.` : 'Aucune table selectionnee. Choisissez les tables du prochain groupe sur le plan.';
+      const current = booking(s.focusBooking), seats = tables.reduce((n, t) => n + t.seats, 0);
+      const feedback = current && placementFeedback(current, tables);
+      const workflow = s.layoutLocked && !s.template ? `<div class="fp-placement-desk" data-current="${Boolean(current)}" data-ready="${Boolean(current && tables.length && !feedback.error)}">
+        <div class="fp-desk-details"><div class="fp-desk-top">${current ? `<div class="fp-desk-guest"><strong title="${escape(current.name)}">${escape(current.name)}</strong><span>${escape(current.time)} · ${current.people} couverts${current.status === 'pending' ? ' · A confirmer' : ''}</span></div><button type="button" data-action="cancel-placement" aria-label="Quitter la selection du groupe">Changer</button>` : '<span class="fp-desk-step">01 / Choisir une reservation</span>'}</div>
+        ${current ? `<div class="fp-seat-meter"><strong>${seats}<small> / ${current.people}</small></strong><span>places selectionnees</span></div>` : '<p>Choisissez un groupe, puis ses tables sur le plan.</p>'}
+        <div class="fp-table-chips">${tables.map(t => `<button type="button" data-deselect="${escape(t.id)}" aria-label="Deselectionner la table ${escape(t.name)}">${escape(t.name)} <span aria-hidden="true">&times;</span></button>`).join('')}</div>
+        ${current ? `<p class="fp-desk-feedback" data-error="${feedback.error}" role="status">${escape(feedback.error ? feedback.message : tables.length ? `${seats} places pour ${current.people} couverts. Pret a attribuer.` : 'Touchez une ou plusieurs tables libres.')}</p>` : ''}
+        <div class="fp-table-legend"><span>Libre</span><span>Attribuee</span><span>A revoir</span></div></div>
+        ${current ? `<button type="button" class="staff-primary fp-assign" data-action="confirm-placement" ${!tables.length || feedback.error ? 'disabled' : ''}>${placedIds.has(current.id) ? 'Reattribuer' : 'Attribuer'} les tables</button><small>Au brouillon, puis Enregistrer le plan.</small>` : ''}</div>` : '';
       const unknown = s.data.bookings.filter(b => !hasOrder(b)).length;
-      el.innerHTML = `<p class="fp-selection-summary" role="status">${escape(selection)}</p><p class="staff-muted">Rang parmi les reservations de ce service dont la date de prise est connue ; un meme horodatage donne le meme rang.${unknown ? ` ${unknown} reservation(s) sans date connue : verifiez leur priorite manuellement.` : ''}</p>` + (rows.map(b => {
+      const desk = root.querySelector('[data-placement-desk]');
+      if (desk) desk.innerHTML = workflow;
+      el.innerHTML = `<p class="fp-selection-summary" role="status">${escape(selection)}</p><p class="staff-muted fp-order-help" data-unknown="${unknown > 0}">Rang parmi les reservations de ce service dont la date de prise est connue ; un meme horodatage donne le meme rang.${unknown ? ` ${unknown} reservation(s) sans date connue : verifiez leur priorite manuellement.` : ''}</p>` + (visibleRows.map(b => {
         const a = s.data.assignments.find(a => a.reservationId === b.id);
         const labels = a?.tableIds.map(id => s.data.layout.tables.find(t => t.id === id)?.name || '?').join(' + ');
         // A selection advises unplaced groups only; Replacer still validates on click.
         const feedback = b.people && !a && placementFeedback(b, tables);
-        return `<article class="fp-booking" data-booking-id="${escape(b.id)}" data-focus-booking="${s.focusBooking === b.id}" data-review="${Boolean(a?.review)}"><div class="fp-booking-info">${b.people ? `<span class="fp-booking-order">${hasOrder(b) ? `Ordre de reservation · n° ${b.bookingOrder}` : 'Ordre a verifier'}</span>` : ''}<strong>${escape(b.name)}</strong>${b.people ? `<p class="fp-created-at">${escape(creationLabel(b))}</p>` : ''}${s.focusBooking === b.id ? '<p>Reservation selectionnee : choisissez ses tables puis enregistrez le plan.</p>' : ''}<p>Repas : ${escape(b.time)}${b.people ? ` · ${b.people} couverts` : ''}${b.status === 'pending' ? ' · A confirmer' : ''}</p><p>${a ? `${a.review ? 'A revoir : ' : 'Tables : '}${escape(labels)}` : 'Non placee'}${b.legacyTable ? ` · Ancienne note : ${escape(b.legacyTable)}` : ''}</p>${feedback ? `<p id="fp-placement-${escape(b.id)}" class="fp-placement-feedback" data-placement-feedback="${escape(b.id)}" data-error="${feedback.error}">${escape(feedback.message)}</p>` : ''}</div><div class="fp-actions">${b.people ? `<button type="button" data-open="${escape(b.id)}">Fiche</button><button type="button" data-place="${escape(b.id)}" ${feedback ? `aria-describedby="fp-placement-${escape(b.id)}"` : ''} ${!s.selected.size ? 'disabled' : ''}>${placedIds.has(b.id) ? 'Replacer' : 'Placer'}</button>` : ''}${a ? `<button type="button" data-unplace="${escape(b.id)}">Retirer du plan</button>` : ''}</div></article>`;
-      }).join('') || '<p class="staff-muted">Aucune reservation pour ce service. Le plan ne cree aucune reservation.</p>');
+        return `<article class="fp-booking" data-booking-id="${escape(b.id)}" data-focus-booking="${s.focusBooking === b.id}" data-review="${Boolean(a?.review)}"><div class="fp-booking-info">${b.people ? `<span class="fp-booking-order">${hasOrder(b) ? `Ordre de reservation · n° ${b.bookingOrder}` : 'Ordre a verifier'}</span>` : ''}<strong>${escape(b.name)}</strong>${b.people ? `<p class="fp-created-at">${escape(creationLabel(b))}</p>` : ''}${s.focusBooking === b.id ? '<p class="fp-current-label">Groupe selectionne</p>' : ''}<p>Repas : ${escape(b.time)}${b.people ? ` · ${b.people} couverts` : ''}${b.status === 'pending' ? ' · A confirmer' : ''}</p><p>${a ? `${a.review ? 'A revoir : ' : 'Tables : '}${escape(labels)}` : 'Non placee'}${b.legacyTable ? ` · Ancienne note : ${escape(b.legacyTable)}` : ''}</p>${feedback ? `<p id="fp-placement-${escape(b.id)}" class="fp-placement-feedback" data-placement-feedback="${escape(b.id)}" data-error="${feedback.error}">${escape(feedback.message)}</p>` : ''}</div><div class="fp-actions">${b.people ? `<button type="button" data-choose="${escape(b.id)}" aria-pressed="${s.focusBooking === b.id}">${s.focusBooking === b.id ? 'Selectionne' : a ? 'Revoir les tables' : 'Choisir ce groupe'}</button><button type="button" data-open="${escape(b.id)}">Fiche</button><button type="button" data-place="${escape(b.id)}" ${feedback ? `aria-describedby="fp-placement-${escape(b.id)}"` : ''} ${!s.selected.size ? 'disabled' : ''}>${placedIds.has(b.id) ? 'Replacer' : 'Placer'}</button>` : ''}${a ? `<button type="button" data-unplace="${escape(b.id)}">Retirer du plan</button>` : ''}</div></article>`;
+      }).join('') || `<p class="staff-muted">${rows.length ? 'Tous les clients sont places. Choisissez Toutes pour revoir les attributions.' : 'Aucune reservation pour ce service. Le plan ne cree aucune reservation.'}</p>`);
+    }
+    function zoomTo(value) {
+      const next = Math.min(2, Math.max(1, value));
+      if (next === s.zoom) return;
+      const wrap = root.querySelector('.fp-board-wrap'), ratio = next / s.zoom;
+      const left = wrap ? (wrap.scrollLeft + wrap.clientWidth / 2) * ratio - wrap.clientWidth / 2 : 0;
+      const top = wrap ? (wrap.scrollTop + wrap.clientHeight / 2) * ratio - wrap.clientHeight / 2 : 0;
+      s.zoom = next; render();
+      const updated = root.querySelector('.fp-board-wrap');
+      if (updated) { updated.scrollLeft = Math.max(0, left); updated.scrollTop = Math.max(0, top); }
     }
     function move(dx, dy) {
       if (s.layoutLocked) return;
@@ -401,6 +456,11 @@
         if (!['booking', 'time'].includes(value)) return;
         s.order = value; bookings(); return;
       }
+      if (c === 'placement-filter') {
+        if (!['all', 'unplaced'].includes(value)) return;
+        s.placementFilter = value; bookings();
+        root.querySelector('[data-bookings]').scrollTop = 0; return;
+      }
       if ((c === 'date' || c === 'service') && s[c] === value) return;
       if (!await discard()) { render(); return; }
       if (c === 'date' && !/^\d{4}-\d{2}-\d{2}$/.test(value)) { render(); return; }
@@ -434,6 +494,27 @@
     on('click', async e => {
       if (s.busy || s.confirming || s.dragging) return;
       const el = e.target.closest('button'); if (!el || el.disabled) return;
+      if (el.dataset.action === 'expand-view' || el.dataset.action === 'exit-view') {
+        if (el.dataset.action === 'expand-view' && (!s.layoutLocked || !s.data)) return;
+        s.planView = el.dataset.action === 'expand-view' ? 'expanded' : 'standard';
+        s.contextOpen = false; render();
+        root.querySelector(`[data-action="${serviceView() ? 'exit-view' : 'expand-view'}"]`)?.focus({ preventScroll: true }); return;
+      }
+      if (el.dataset.action === 'view-context') { s.contextOpen = !s.contextOpen; render(); return; }
+      if (el.dataset.action === 'zoom-in') { zoomTo(s.zoom + .25); return; }
+      if (el.dataset.action === 'zoom-out') { zoomTo(s.zoom - .25); return; }
+      if (el.dataset.action === 'zoom-reset') { zoomTo(1); return; }
+      if (el.dataset.action === 'cancel-placement') { s.focusBooking = null; s.selected.clear(); render(); return; }
+      if (el.dataset.deselect) { s.selected.delete(el.dataset.deselect); render(); return; }
+      if (el.dataset.choose) {
+        if (!applyEditor() || s.adding) return;
+        const b = booking(el.dataset.choose);
+        if (!b) return;
+        const a = s.data.assignments.find(a => a.reservationId === b.id);
+        s.focusBooking = b.id; s.selected = new Set(a?.tableIds || []);
+        const first = selectedTables()[0]; if (first) s.zone = first.zone;
+        render(); return;
+      }
       if (el.dataset.action === 'toggle-lock') {
         if (!s.data) return;
         if (!s.layoutLocked && (s.editDirty || s.adding)) {
@@ -456,8 +537,9 @@
       }
       if (el.dataset.open) { options.onOpenReservation?.(el.dataset.open); return; }
       if (el.dataset.unplace) { s.data.assignments = s.data.assignments.filter(a => a.reservationId !== el.dataset.unplace); mark(); render(); return; }
-      if (el.dataset.place) {
-        const b = booking(el.dataset.place), tables = selectedTables();
+      if (el.dataset.place || el.dataset.action === 'confirm-placement') {
+        if (s.adding || !applyEditor()) return;
+        const b = booking(el.dataset.place || s.focusBooking), tables = selectedTables();
         if (!b || !tables.length) return;
         const feedback = placementFeedback(b, tables);
         if (feedback.error) { status(feedback.message, true); return; }
@@ -501,6 +583,18 @@
       }
     });
     on('keydown', e => {
+      if (serviceView() && e.key === 'Escape' && !s.busy && !s.confirming && !s.dragging) {
+        e.preventDefault(); s.planView = 'standard'; s.contextOpen = false; render();
+        root.querySelector('[data-action="expand-view"]')?.focus({ preventScroll: true }); return;
+      }
+      if (serviceView() && e.key === 'Tab') {
+        const controls = [...root.querySelectorAll('button,input,select,textarea,a[href]')]
+          .filter(el => !el.matches(':disabled') && el.getClientRects().length);
+        const first = controls[0], last = controls.at(-1);
+        if (e.shiftKey && e.target === first || !e.shiftKey && e.target === last) {
+          e.preventDefault(); (e.shiftKey ? last : first)?.focus(); return;
+        }
+      }
       const table = e.target.closest('[data-table]');
       if (!table || s.layoutLocked || s.busy || s.adding || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
       if (!applyEditor()) { e.preventDefault(); return; }
