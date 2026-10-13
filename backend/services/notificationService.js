@@ -23,23 +23,23 @@ function buildCancelUrl(reservation) {
 }
 
 // Bloc HTML « arrhes payées » (vide si pas d'arrhes)
-function depositBlockHtml(reservation) {
+function depositBlockHtml(reservation, theme = {}) {
   if (!hasPaidDeposit(reservation)) return '';
   const cancellationHours = parseInt(process.env.DEPOSIT_CANCELLATION_HOURS, 10) || 24;
   return `
-            <div style="background-color: #e8f5e9; border-left: 4px solid #4caf50; padding: 18px; margin: 25px 0; border-radius: 5px;">
-              <p style="color: #2e7d32; margin: 0 0 6px 0; font-size: 15px;"><strong>✓ Arrhes reçues : ${formatAmount(reservation.deposit.amountCents, reservation.deposit.currency)}</strong></p>
+            <div style="background-color: ${theme.background || '#e8f5e9'}; border-left: 4px solid ${theme.accent || '#4caf50'}; padding: 18px; margin: 25px 0; border-radius: 5px;">
+              <p style="color: ${theme.text || '#2e7d32'}; margin: 0 0 6px 0; font-size: 15px;"><strong>✓ Arrhes reçues : ${formatAmount(reservation.deposit.amountCents, reservation.deposit.currency)}</strong></p>
               <p style="color: #555; margin: 0; font-size: 13px; line-height: 1.5;">Ce montant sera <strong>déduit de votre addition</strong>. Il vous est intégralement remboursé en cas d'annulation au moins ${cancellationHours}h avant votre venue.</p>
             </div>`;
 }
 
 // Bloc HTML « Annuler ma réservation »
-function cancelBlockHtml(reservation) {
+function cancelBlockHtml(reservation, theme = {}) {
   const changesEnabled = process.env.RESERVATION_CHANGES_ENABLED === 'true';
   return `
-            <div style="text-align: center; margin: 25px 0; padding: 18px; background-color: #fafaf7; border: 1px solid #e7e5df; border-radius: 8px;">
+            <div style="text-align: center; margin: 25px 0; padding: 18px; background-color: ${theme.background || '#fafaf7'}; border: 1px solid ${theme.border || '#e7e5df'}; border-radius: 8px;">
               <p style="color: #666; font-size: 13px; margin: 0 0 12px 0;">${changesEnabled ? 'Un imprévu ? Demandez une modification au restaurant ou annulez en ligne.' : 'Un imprévu ? Vous pouvez annuler votre réservation en ligne.'}</p>
-              <a href="${buildCancelUrl(reservation)}" style="display: inline-block; background-color: #78716c; color: white; padding: 10px 22px; text-decoration: none; border-radius: 6px; font-size: 13px;">${changesEnabled ? 'Gérer ma réservation' : 'Annuler ma réservation'}</a>
+              <a href="${buildCancelUrl(reservation)}" style="display: inline-block; background-color: ${theme.accent || '#78716c'}; color: white; padding: 12px 22px; text-decoration: none; border-radius: 6px; font-size: 13px;">${changesEnabled ? 'Gérer ma réservation' : 'Annuler ma réservation'}</a>
             </div>`;
 }
 
@@ -321,88 +321,12 @@ async function confirmationEmail(reservation) {
     from: `"Au Murmure des Flots 🌊" <${process.env.EMAIL_USER}>`,
     to: clientEmail,
     subject: `✨ Réservation confirmée — ${new Date(reservation.date).toLocaleDateString('fr-FR')}`,
-    html: `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      </head>
-      <body style="margin: 0; padding: 0; font-family: 'Georgia', serif; background-color: #f5f5f5;">
-        <div style="max-width: 600px; margin: 0 auto; background-color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-          
-          <!-- Header avec logo -->
-          <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 20px; text-align: center;">
-            <img src="https://raw.githubusercontent.com/Gleekch/restaurant-booking-backend/main/assets/logo.png" alt="Au Murmure des Flots" style="width: 120px; height: 120px; border-radius: 50%; background: white; padding: 10px; margin: 0 auto 20px; display: block; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
-            <h1 style="color: white; margin: 0; font-size: 28px; font-weight: 300; text-shadow: 2px 2px 4px rgba(0,0,0,0.2);">Au Murmure des Flots</h1>
-            <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0 0; font-size: 14px; font-style: italic;">Restaurant Bistronomique</p>
-          </div>
-          
-          <!-- Contenu -->
-          <div style="padding: 40px 30px;">
-            <h2 style="color: #2c3e50; font-size: 24px; margin-bottom: 10px; font-weight: 300;">Confirmation de réservation</h2>
-            
-            <p style="color: #555; font-size: 16px; line-height: 1.6;">
-              Cher(e) ${escapeHtml(reservation.customerName)},
-            </p>
-            
-            <p style="color: #555; font-size: 16px; line-height: 1.6;">
-              C'est avec grand plaisir que nous confirmons votre réservation. Notre équipe a hâte de vous accueillir pour une expérience gastronomique inoubliable.
-            </p>
-            
-            <!-- Détails de la réservation -->
-            <div style="background-color: #ffffff; border: 2px solid #667eea; border-radius: 10px; padding: 20px; margin: 30px 0;">
-              <p style="margin: 0 0 14px 0; font-size: 15px; font-weight: bold; color: #333333; border-bottom: 1px solid #eeeeee; padding-bottom: 10px;">📅 Détails de votre réservation</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Date :</strong> ${new Date(reservation.date).toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Heure :</strong> ${escapeHtml(reservation.time)}</p>
-              <p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Couverts :</strong> ${escapeHtml(reservation.numberOfPeople)} ${reservation.numberOfPeople > 1 ? 'personnes' : 'personne'}</p>
-              ${reservation.specialRequests ? `<p style="margin: 8px 0; font-size: 15px; color: #111111;"><strong>Notes :</strong> ${escapeHtml(reservation.specialRequests)}</p>` : ''}
-            </div>
-            
-            <!-- Message de bienvenue -->
-            <div style="background-color: #fef5e7; border-left: 4px solid #f39c12; padding: 15px; margin: 25px 0; border-radius: 5px;">
-              <p style="color: #8b6914; margin: 0; font-size: 14px;">
-                <strong>💡 Bon à savoir :</strong><br>
-                Notre menu est composé de produits frais et locaux, sélectionnés avec soin chaque jour. 
-                N'hésitez pas à nous informer de toute allergie ou préférence alimentaire.
-              </p>
-            </div>
-            
-            ${depositBlockHtml(reservation)}
-            ${cancelBlockHtml(reservation)}
-
-            <!-- Contact -->
-            <div style="text-align: center; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e0e0e0;">
-              <p style="color: #666; font-size: 14px; margin: 5px 0;">
-                📞 Téléphone : 02 62 26 67 19
-              </p>
-              <p style="color: #666; font-size: 14px; margin: 5px 0;">
-                📧 Email : aumurmuredesflots@gmail.com
-              </p>
-              <p style="color: #666; font-size: 14px; margin: 5px 0;">
-                📍 Adresse : 44 rue du Général Lambert, 97436 Saint-Leu
-              </p>
-            </div>
-          </div>
-          
-          <!-- Footer -->
-          <div style="background-color: #2c3e50; padding: 30px; text-align: center;">
-            <p style="color: #ecf0f1; margin: 0 0 10px 0; font-size: 16px; font-style: italic;">
-              "Où chaque repas devient un voyage culinaire"
-            </p>
-            <div style="margin-top: 20px;">
-              <a href="https://resa-aumurmuredesflots.onrender.com" style="color: #3498db; text-decoration: none; font-size: 14px;">Nouvelle réservation</a>
-              <span style="color: #7f8c8d; margin: 0 10px;">|</span>
-              <a href="tel:0262266719" style="color: #3498db; text-decoration: none; font-size: 14px;">Nous appeler</a>
-            </div>
-            <p style="color: #7f8c8d; margin: 20px 0 0 0; font-size: 12px;">
-              © 2025 Au Murmure des Flots - Tous droits réservés
-            </p>
-          </div>
-        </div>
-      </body>
-      </html>
-    `
+    html: require('./confirmationEmailTemplate').renderConfirmationEmail({
+      reservation, escapeHtml,
+      depositHtml: depositBlockHtml(reservation, { background: '#edf5f3', accent: '#27777e', text: '#114a55' }),
+      cancelHtml: cancelBlockHtml(reservation, { background: '#f7f5ef', border: '#e3ddd0', accent: '#27777e' }),
+      siteUrl: (process.env.PUBLIC_SITE_URL || 'https://www.aumurmuredesflots.com').replace(/\/+$/, '')
+    })
   };
   
   try {
