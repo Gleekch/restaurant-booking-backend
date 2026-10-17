@@ -59,6 +59,8 @@ const reservationSchema = new mongoose.Schema({
   },
   bookingRequestFingerprint: { type: String, default: null },
   activeBookingKey: { type: String, default: null },
+  cancelledAt: { type: Date, default: undefined },
+  cancellationInitiator: { type: String, enum: ['client', 'restaurant'], default: undefined },
   status: {
     type: String,
     enum: ['awaiting-payment', 'pending', 'confirmed', 'cancelled', 'completed', 'no-show'],

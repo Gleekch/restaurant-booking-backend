@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const BlockedService = require('../models/BlockedService');
 const { parseDateInput } = require('../services/capacityService');
-const { apiKey } = require('../middleware/auth');
+const { apiKey, requireServiceBlockApproval } = require('../middleware/auth');
+const rateLimit = require('express-rate-limit');
 const nodemailer = require('nodemailer');
 
 const emailTransporter = nodemailer.createTransport({
@@ -56,8 +57,17 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Bloquer un service (staff uniquement)
-router.post('/', apiKey, async (req, res) => {
+const blockApprovalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { success: false, message: 'Trop de validations refusees. Reessayez dans 15 minutes. Aucun service ferme.' }
+});
+
+// Staff authentication never substitutes for explicit, per-action approval.
+router.post('/', apiKey, blockApprovalLimiter, requireServiceBlockApproval, async (req, res) => {
   try {
     const { date, service, reason } = req.body;
     const { year, month, day } = parseDateInput(date);

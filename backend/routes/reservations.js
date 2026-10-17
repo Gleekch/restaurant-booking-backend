@@ -706,7 +706,7 @@ router.put('/:id', apiKey, async (req, res) => {
 // Logique d'annulation partagée (admin + client) : rembourse les arrhes si
 // l'annulation a lieu suffisamment en avance, puis passe la résa en 'cancelled'.
 // Renvoie { refundMessage, refunded }.
-async function cancelReservationCore(reservationId) {
+async function cancelReservationCore(reservationId, cancellationInitiator = 'restaurant') {
   let refundMessage = '';
   let refunded = false;
   let reservation;
@@ -717,7 +717,8 @@ async function cancelReservationCore(reservationId) {
     if (before.status === 'completed') throw new Error('Cette reservation ne peut plus etre annulee');
     if (before.status === 'cancelled') { reservation = before; break; }
     const depositStatus = before.deposit && before.deposit.status || 'none';
-    const fields = { status: 'cancelled', activeBookingKey: null };
+    const fields = { status: 'cancelled', activeBookingKey: null,
+      cancelledAt: new Date(), cancellationInitiator };
     if (depositStatus === 'paid' && hoursUntilReservation(before) >= getDepositConfig().cancellationHours) {
       fields['deposit.status'] = 'refund_pending';
       fields['deposit.refundRequestedAt'] = new Date();
@@ -866,7 +867,7 @@ router.post('/:id/cancel', cancelLimiter, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Cette reservation ne peut plus etre annulee.' });
     }
 
-    const result = await cancelReservationCore(reservation._id);
+    const result = await cancelReservationCore(reservation._id, 'client');
     const { refundMessage, refunded } = result;
 
     if (result.changed && result.reservation.email) {

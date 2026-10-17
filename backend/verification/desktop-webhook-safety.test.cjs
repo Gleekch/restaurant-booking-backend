@@ -25,13 +25,17 @@ test('desktop cancellation event must refresh refunded deposit, not only booking
   const end = source.indexOf('\n});', start) + 4;
   assert.ok(start >= 0 && end > start);
   let callback;
+  let cancellationNotice;
   const initial = { _id: 'test', status: 'confirmed', deposit: { status: 'paid' } };
   const sandbox = { reservations: [initial], ipcRenderer: { on: (_name, cb) => { callback = cb; } },
+    cancellationAlerts: { event: row => { cancellationNotice = row; } },
     displayReservations() {}, updateStats() {}, modal: { style: {}, dataset: {} } };
   vm.runInNewContext(source.slice(start, end), sandbox);
   callback(null, { ...initial, status: 'cancelled', deposit: { status: 'refunded' } });
   assert.equal(initial.status, 'cancelled');
   assert.equal(initial.deposit.status, 'refunded', 'Desktop retains paid deposit until a full reload');
+  assert.equal(cancellationNotice.status, 'cancelled', 'Cancellation must also reach the staff alert queue');
+  assert.equal(cancellationNotice.deposit.status, 'refunded');
 });
 
 for (const valid of [true, false]) {

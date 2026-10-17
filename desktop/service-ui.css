@@ -1,4 +1,19 @@
 /* Shared hospitality UI. Presentation only; reservation/payment rules live elsewhere. */
+.staff-cancellations[hidden] { display:none; }
+.staff-cancellations { box-sizing:border-box; position:fixed; top:max(72px,env(safe-area-inset-top)); right:max(16px,env(safe-area-inset-right)); z-index:950; width:min(550px,calc(100vw - 96px)); max-width:calc(100% - 24px); background:var(--surface,#fffefa); color:var(--text,#114a55); border:1px solid var(--brand-sand,#b79a6c); border-left:4px solid var(--warning,#9b6b24); border-radius:12px; box-shadow:0 10px 28px #114a5520; }
+.staff-cancellations * { box-sizing:border-box; }
+.staff-cancellations summary { cursor:pointer; min-height:48px; padding:13px 16px; font-size:14px; font-weight:700; background:var(--warning-bg,#fff5e5); border-radius:10px; }
+.staff-cancellation-list { max-height:40vh; max-height:40dvh; overflow:auto; overscroll-behavior:contain; }
+.staff-cancellation-row { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; padding:14px 16px; border-top:1px solid var(--border,#dbe3df); }
+.staff-cancellation-row>div:first-child { flex:1 1 260px; min-width:0; overflow-wrap:anywhere; }
+.staff-cancellation-row strong { font-size:14px; }
+.staff-cancellation-row p { margin:5px 0; font-size:12px; line-height:1.5; }
+.staff-cancellation-hint { color:var(--text-secondary,#536d6d); }
+.staff-cancellation-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.staff-cancellation-actions button { min-height:44px; padding:9px 12px; border:1px solid var(--border,#b9ceca); background:var(--surface,#fffefa); color:var(--text,#114a55); border-radius:8px; font:inherit; font-size:12px; cursor:pointer; }
+.staff-cancellations :focus-visible { outline:3px solid var(--brand-teal,#27777e); outline-offset:2px; }
+.staff-cancellation-live { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media(max-width:600px) { .staff-cancellations { right:12px; width:calc(100vw - 24px); } .staff-cancellation-actions { width:100%; } .staff-cancellation-actions button:first-child { flex:1; } }
 .service-rhythm { margin: 18px 0; padding-top: 16px; border-top: 1px solid var(--border); cursor: default; min-width: 0; }
 .service-section > .service-rhythm { margin: 16px; }
 .rhythm-heading { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
@@ -373,3 +388,15 @@ dialog::backdrop { background: #103b46d1; }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+.service-block-approval { box-sizing: border-box; width: min(520px, calc(100% - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 28px; border: 1px solid var(--border, #cbd7d3); border-radius: 16px; background: var(--surface, #fffefa); color: var(--text, #143d48); font-family: var(--body-font, sans-serif); box-shadow: 0 24px 80px #12394233; }
+.service-block-approval::backdrop { background: #12394266; }
+.service-block-approval h2 { margin: 0 0 16px; font-size: 23px; }
+.service-block-approval p { line-height: 1.6; }
+.service-block-approval label { display: block; margin: 20px 0 8px; font-weight: 600; }
+.service-block-approval input { box-sizing: border-box; width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid var(--border, #cbd7d3); border-radius: 8px; font: inherit; background: #fff; color: #143d48; }
+.service-block-hint { font-size: 12px; color: var(--text-secondary, #58727a); }
+.service-block-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.service-block-actions button { min-height: 46px; padding: 10px 16px; border: 1px solid #9db6b5; border-radius: 8px; color: #143d48; background: #fffefa; font: inherit; cursor: pointer; }
+.service-block-actions button[type="submit"] { color: #fff; background: #17656b; border-color: #17656b; }
+.service-block-approval :focus-visible { outline: 3px solid #a8874e; outline-offset: 3px; }
+@media (max-width: 500px) { .service-block-approval { padding: 22px; } .service-block-actions button { width: 100%; } }

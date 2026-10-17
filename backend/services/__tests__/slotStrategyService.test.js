@@ -7,10 +7,13 @@ const { getEnrichedAvailability } = require('../slotStrategyService');
 const { getServiceRhythm } = require('../serviceRhythmService');
 let records;
 beforeEach(() => {
+  // Availability fixtures must remain future-dated regardless of the machine clock.
+  jest.useFakeTimers({ doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'nextTick', 'setImmediate', 'clearImmediate', 'queueMicrotask', 'performance', 'hrtime'] }).setSystemTime(new Date('2026-10-01T04:00:00Z'));
   records = [];
   Reservation.find.mockImplementation(async () => records.filter(r => r.status !== 'cancelled'));
   BlockedService.find.mockResolvedValue([]);
 });
+afterEach(() => jest.useRealTimers());
 const booking = (time, numberOfPeople, status = 'confirmed') => ({ time, numberOfPeople, status });
 const load = async (people = 2, date = '2026-10-07') =>
   getEnrichedAvailability(date, people, await getAvailableSlots(date, people, 50));

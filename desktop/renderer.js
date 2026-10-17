@@ -27,6 +27,10 @@ let reservationSubmitKey = null;
 let reservationSubmitFingerprint = null;
 let floorPlanTarget = null;
 let notifiedReservations = new Set();
+const cancellationAlerts = window.StaffCancellationAlerts?.attach({
+    onOpen: id => { const row = reservations.find(r => r._id === id); if (row) showReservationDetails(row); },
+    notify: (title, body) => { if (window.Notification?.permission === 'granted') new window.Notification(title, { body }); }
+});
 
 // Limite couverts en ligne — miroir de ONLINE_CAPACITY côté backend (défaut 50)
 const ONLINE_CAPACITY_LIMIT = 50;
@@ -215,6 +219,7 @@ ipcRenderer.on('new-reservation', (event, reservation) => {
 
 // Mise à jour des réservations
 ipcRenderer.on('update-reservation', (event, reservation) => {
+    cancellationAlerts?.event(reservation);
     const index = reservations.findIndex(r => r._id === reservation._id);
     if (index !== -1) {
         Object.assign(reservations[index], reservation);
@@ -228,6 +233,7 @@ ipcRenderer.on('update-reservation', (event, reservation) => {
 
 // Annulation de réservation
 ipcRenderer.on('cancel-reservation', (event, reservation) => {
+    cancellationAlerts?.event(reservation);
     const index = reservations.findIndex(r => r._id === reservation._id);
     if (index !== -1) {
         Object.assign(reservations[index], reservation);
@@ -247,6 +253,7 @@ async function loadReservations() {
         console.log('Données reçues:', data);
         if (data.success) {
             reservations = data.data;
+            cancellationAlerts?.observe(reservations);
             window.ServiceRelease.refreshFinancePanel(document.getElementById('reservation-details'), reservations);
             console.log(`${reservations.length} réservations chargées`);
 
@@ -1366,6 +1373,8 @@ function renderOperationalDayView() {
     reservationsContainer.querySelectorAll('.btn-block-service').forEach((btn) => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
+            if (btn.disabled) return;
+            btn.disabled = true;
             const date = btn.dataset.date;
             const service = btn.dataset.service;
             try {
@@ -1375,12 +1384,16 @@ function renderOperationalDayView() {
                     await api.apiRequest('/api/blocked-services', { method: 'DELETE', body: { date, service } });
                     showNotification('Service débloqué', `Le service du ${service} est à nouveau ouvert.`);
                 } else {
-                    await api.apiRequest('/api/blocked-services', { method: 'POST', body: { date, service, reason: 'Complet' } });
+                    const approvalPassword = await window.ServiceBlockApproval?.request(date, service);
+                    if (!approvalPassword) return;
+                    await api.apiRequest('/api/blocked-services', { method: 'POST', body: { date, service, reason: 'Complet', approvalPassword } });
                     showNotification('Service bloqué', `Le service du ${service} est marqué complet sur le site.`);
                 }
                 displayReservations();
             } catch (error) {
                 alert('Erreur : ' + error.message);
+            } finally {
+                btn.disabled = false;
             }
         });
     });

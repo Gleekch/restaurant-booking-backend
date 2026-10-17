@@ -20,6 +20,8 @@ let editInFlight = false;
 let createRequestKey = null;
 let createFingerprint = null;
 let floorPlanTarget = null;
+let cancellationAlerts;
+let reservationsLoading = false;
 
 async function floorPlanRequest(endpoint, options = {}) {
     const response = await apiFetch(endpoint, { ...options, signal: AbortSignal.timeout(20000), headers: { 'Content-Type': 'application/json' }, body: options.body ? JSON.stringify(options.body) : undefined });
@@ -46,6 +48,9 @@ const pendingBadge = document.getElementById('pending-badge');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+    cancellationAlerts = window.StaffCancellationAlerts?.attach({
+        onOpen: id => { const row = reservations.find(r => r._id === id); if (row) showReservationDetail(row); }
+    });
     window.FloorPlan.watch(document.body, () => reservations, floorPlanRequest);
     initNavigation();
     initNewReservationForm();
@@ -54,6 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Refresh every 30 seconds
     setInterval(loadReservations, 30000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadReservations(); });
 });
 
 // Navigation
@@ -81,6 +87,8 @@ function initNavigation() {
 
 // Load Reservations
 async function loadReservations() {
+    if (reservationsLoading) return;
+    reservationsLoading = true;
     try {
         const response = await apiFetch(`${API_URL}/api/reservations`);
         if (response.status === 401) {
@@ -92,10 +100,13 @@ async function loadReservations() {
         const data = await response.json();
         // L'API retourne { success: true, data: [...] }
         if (data.success) {
+            if (!Array.isArray(data.data)) throw new Error('Reponse de reservations invalide');
             reservations = data.data;
         } else {
-            reservations = Array.isArray(data) ? data : [];
+            if (!Array.isArray(data)) throw new Error('Reponse de reservations invalide');
+            reservations = data;
         }
+        cancellationAlerts?.observe(reservations);
         updateConnectionStatus(true);
         updatePendingBadge();
         window.ServiceRelease?.refreshFinancePanel(document.getElementById('modal-body'), reservations);
@@ -104,6 +115,7 @@ async function loadReservations() {
         console.error('Erreur chargement:', error);
         updateConnectionStatus(false);
     } finally {
+        reservationsLoading = false;
         loading.style.display = 'none';
     }
 }
@@ -1170,19 +1182,19 @@ function isServiceBlocked(service) {
 }
 
 async function toggleBlockService(date, service, rerender) {
-    if (isServiceBlocked(service)) {
-        await apiFetch(`${API_URL}/api/blocked-services`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date, service })
-        });
+    const blocked = isServiceBlocked(service);
+    const approvalPassword = blocked ? null : await window.ServiceBlockApproval?.request(date, service);
+    if (!blocked && !approvalPassword) return;
+    const response = await apiFetch(`${API_URL}/api/blocked-services`, {
+        method: blocked ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(blocked ? { date, service } : { date, service, reason: 'Complet', approvalPassword })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.message || 'Le service n a pas ete modifie.');
+    if (blocked) {
         showToast(`Service ${service} débloqué — réservations rouvertes`, 'success');
     } else {
-        await apiFetch(`${API_URL}/api/blocked-services`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ date, service, reason: 'Complet' })
-        });
         showToast(`Service ${service} marqué complet sur le site`, 'success');
     }
     await loadBlockedServices(date);
@@ -1200,7 +1212,11 @@ function attachBlockButtons(rerender) {
 
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
-            await toggleBlockService(btn.dataset.date, service, rerender);
+            if (btn.disabled) return;
+            btn.disabled = true;
+            try { await toggleBlockService(btn.dataset.date, service, rerender); }
+            catch (error) { showToast(error.message || 'Impossible de modifier ce service.', 'error'); }
+            finally { btn.disabled = false; }
         });
     });
 }

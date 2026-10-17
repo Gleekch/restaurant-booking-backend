@@ -38,6 +38,19 @@ function basicAuth(req, res, next) {
   return res.status(401).send('Authentification requise');
 }
 
+function requireServiceBlockApproval(req, res, next) {
+  res.setHeader('Cache-Control', 'no-store');
+  const expected = process.env.SERVICE_BLOCK_PASSWORD || process.env.ADMIN_PASS;
+  if (!expected) return res.status(503).json({ success: false, message: 'Validation responsable indisponible. Aucun service ferme.' });
+  const password = req.body && req.body.approvalPassword;
+  if (typeof password !== 'string' || password.length > 1024 || !secretEquals(password, expected)) {
+    return res.status(403).json({ success: false, message: 'Mot de passe responsable incorrect ou manquant. Aucun service ferme.' });
+  }
+  // Approval is per request and is never forwarded to a model or a notification.
+  delete req.body.approvalPassword;
+  next();
+}
+
 function socketAuth(socket, next) {
   const headers = socket.handshake.headers || {};
   const key = socket.handshake.auth && socket.handshake.auth.apiKey;
@@ -45,4 +58,4 @@ function socketAuth(socket, next) {
   next(new Error('Authentification requise'));
 }
 
-module.exports = { apiKey, basicAuth, socketAuth, isOperatorAuthorized };
+module.exports = { apiKey, basicAuth, socketAuth, isOperatorAuthorized, requireServiceBlockApproval };

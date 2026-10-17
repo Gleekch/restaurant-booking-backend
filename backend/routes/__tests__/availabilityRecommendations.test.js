@@ -7,11 +7,14 @@ const router = require('../reservations');
 const handler = router.stack.find(layer => layer.route?.path === '/availability').route.stack.at(-1).handle;
 const saved = process.env.SLOT_RECOMMENDATIONS_ENABLED;
 beforeEach(() => {
+  // Exercise the scheduling rules, not whether this historical fixture is now past.
+  jest.useFakeTimers({ doNotFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'nextTick', 'setImmediate', 'clearImmediate', 'queueMicrotask', 'performance', 'hrtime'] }).setSystemTime(new Date('2026-10-01T04:00:00Z'));
   Reservation.find.mockResolvedValue([{ time: '12:00', numberOfPeople: 19 }]);
   BlockedService.find.mockResolvedValue([]);
   process.env.SLOT_RECOMMENDATIONS_ENABLED = 'true';
 });
 afterEach(() => {
+  jest.useRealTimers();
   jest.restoreAllMocks();
   if (saved === undefined) delete process.env.SLOT_RECOMMENDATIONS_ENABLED;
   else process.env.SLOT_RECOMMENDATIONS_ENABLED = saved;
